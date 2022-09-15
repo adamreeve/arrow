@@ -194,7 +194,7 @@ namespace Apache.Arrow.Ipc
             return arrays;
         }
 
-        private static IBufferDecompressor GetDecompressor(BodyCompression? compression)
+        private IBufferDecompressor GetDecompressor(BodyCompression? compression)
         {
             if (!compression.HasValue)
             {
@@ -211,7 +211,7 @@ namespace Apache.Arrow.Ipc
             return codec switch
             {
                 CompressionType.LZ4_FRAME => throw new NotImplementedException("LZ4 decompression is not supported"),
-                CompressionType.ZSTD => new BufferDecompressor(new ZstdDecompressor()),
+                CompressionType.ZSTD => new BufferDecompressor(new ZstdDecompressor(), _allocator),
                 _ => throw new NotImplementedException($"Compression codec {codec} is not supported")
             };
         }
@@ -351,8 +351,7 @@ namespace Apache.Arrow.Ipc
             int length = (int)buffer.Length;
 
             var data = bodyData.ToReadOnlyMemory(offset, length);
-            var decompressed = decompressor.Decompress(data);
-            return new ArrowBuffer(decompressed);
+            return decompressor.Decompress(data);
         }
     }
 

@@ -12,9 +12,9 @@ namespace Apache.Arrow.Ipc
             _decompressor = new Decompressor();
         }
 
-        public ReadOnlyMemory<byte> Decompress(ReadOnlyMemory<byte> inputData)
+        public int Decompress(ReadOnlyMemory<byte> inputData, Memory<byte> destination)
         {
-            return _decompressor.Unwrap(inputData.Span);
+            return _decompressor.Unwrap(inputData.Span, destination.Span);
         }
 
         public void Dispose()

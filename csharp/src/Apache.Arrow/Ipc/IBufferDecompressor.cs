@@ -4,6 +4,6 @@ namespace Apache.Arrow.Ipc
 {
     internal interface IBufferDecompressor : IDisposable
     {
-        ReadOnlyMemory<byte> Decompress(ReadOnlyMemory<byte> inputData);
+        ArrowBuffer Decompress(ReadOnlyMemory<byte> inputData);
     }
 }
