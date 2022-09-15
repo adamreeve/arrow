@@ -21,8 +21,10 @@ using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Apache.Arrow.Flatbuf;
 using Apache.Arrow.Types;
 using Apache.Arrow.Memory;
+using Type = System.Type;
 
 namespace Apache.Arrow.Ipc
 {
@@ -174,6 +176,7 @@ namespace Apache.Arrow.Ipc
                 return arrays;
             }
 
+            using var decompressor = GetDecompressor(recordBatchMessage.Compression);
             var recordBatchEnumerator = new RecordBatchEnumerator(in recordBatchMessage);
             int schemaFieldIndex = 0;
             do
@@ -182,8 +185,8 @@ namespace Apache.Arrow.Ipc
                 Flatbuf.FieldNode fieldNode = recordBatchEnumerator.CurrentNode;
 
                 ArrayData arrayData = field.DataType.IsFixedPrimitive()
-                    ? LoadPrimitiveField(ref recordBatchEnumerator, field, in fieldNode, messageBuffer)
-                    : LoadVariableField(ref recordBatchEnumerator, field, in fieldNode, messageBuffer);
+                    ? LoadPrimitiveField(ref recordBatchEnumerator, field, in fieldNode, messageBuffer, decompressor)
+                    : LoadVariableField(ref recordBatchEnumerator, field, in fieldNode, messageBuffer, decompressor);
 
                 arrays.Add(ArrowArrayFactory.BuildArray(arrayData));
             } while (recordBatchEnumerator.MoveNextNode());
@@ -191,14 +194,37 @@ namespace Apache.Arrow.Ipc
             return arrays;
         }
 
+        private static IBufferDecompressor GetDecompressor(BodyCompression? compression)
+        {
+            if (!compression.HasValue)
+            {
+                return new UncompressedBufferDecompressor();
+            }
+
+            var method = compression.Value.Method;
+            if (method != BodyCompressionMethod.BUFFER)
+            {
+                throw new NotImplementedException($"Compression method {method} is not supported");
+            }
+
+            var codec = compression.Value.Codec;
+            return codec switch
+            {
+                CompressionType.LZ4_FRAME => throw new NotImplementedException("LZ4 decompression is not supported"),
+                CompressionType.ZSTD => new BufferDecompressor(new ZstdDecompressor()),
+                _ => throw new NotImplementedException($"Compression codec {codec} is not supported")
+            };
+        }
+
         private ArrayData LoadPrimitiveField(
             ref RecordBatchEnumerator recordBatchEnumerator,
             Field field,
             in Flatbuf.FieldNode fieldNode,
-            ByteBuffer bodyData)
+            ByteBuffer bodyData,
+            IBufferDecompressor decompressor)
         {
 
-            ArrowBuffer nullArrowBuffer = BuildArrowBuffer(bodyData, recordBatchEnumerator.CurrentBuffer);
+            ArrowBuffer nullArrowBuffer = BuildArrowBuffer(bodyData, recordBatchEnumerator.CurrentBuffer, decompressor);
             if (!recordBatchEnumerator.MoveNextBuffer())
             {
                 throw new Exception("Unable to move to the next buffer.");
@@ -224,13 +250,13 @@ namespace Apache.Arrow.Ipc
             }
             else
             {
-                ArrowBuffer valueArrowBuffer = BuildArrowBuffer(bodyData, recordBatchEnumerator.CurrentBuffer);
+                ArrowBuffer valueArrowBuffer = BuildArrowBuffer(bodyData, recordBatchEnumerator.CurrentBuffer, decompressor);
                 recordBatchEnumerator.MoveNextBuffer();
 
                 arrowBuff = new[] { nullArrowBuffer, valueArrowBuffer };
             }
 
-            ArrayData[] children = GetChildren(ref recordBatchEnumerator, field, bodyData);
+            ArrayData[] children = GetChildren(ref recordBatchEnumerator, field, bodyData, decompressor);
 
             IArrowArray dictionary = null;
             if (field.DataType.TypeId == ArrowTypeId.Dictionary)
@@ -246,20 +272,21 @@ namespace Apache.Arrow.Ipc
             ref RecordBatchEnumerator recordBatchEnumerator,
             Field field,
             in Flatbuf.FieldNode fieldNode,
-            ByteBuffer bodyData)
+            ByteBuffer bodyData,
+            IBufferDecompressor decompressor)
         {
 
-            ArrowBuffer nullArrowBuffer = BuildArrowBuffer(bodyData, recordBatchEnumerator.CurrentBuffer);
+            ArrowBuffer nullArrowBuffer = BuildArrowBuffer(bodyData, recordBatchEnumerator.CurrentBuffer, decompressor);
             if (!recordBatchEnumerator.MoveNextBuffer())
             {
                 throw new Exception("Unable to move to the next buffer.");
             }
-            ArrowBuffer offsetArrowBuffer = BuildArrowBuffer(bodyData, recordBatchEnumerator.CurrentBuffer);
+            ArrowBuffer offsetArrowBuffer = BuildArrowBuffer(bodyData, recordBatchEnumerator.CurrentBuffer, decompressor);
             if (!recordBatchEnumerator.MoveNextBuffer())
             {
                 throw new Exception("Unable to move to the next buffer.");
             }
-            ArrowBuffer valueArrowBuffer = BuildArrowBuffer(bodyData, recordBatchEnumerator.CurrentBuffer);
+            ArrowBuffer valueArrowBuffer = BuildArrowBuffer(bodyData, recordBatchEnumerator.CurrentBuffer, decompressor);
             recordBatchEnumerator.MoveNextBuffer();
 
             int fieldLength = (int)fieldNode.Length;
@@ -276,7 +303,7 @@ namespace Apache.Arrow.Ipc
             }
 
             ArrowBuffer[] arrowBuff = new[] { nullArrowBuffer, offsetArrowBuffer, valueArrowBuffer };
-            ArrayData[] children = GetChildren(ref recordBatchEnumerator, field, bodyData);
+            ArrayData[] children = GetChildren(ref recordBatchEnumerator, field, bodyData, decompressor);
 
             IArrowArray dictionary = null;
             if (field.DataType.TypeId == ArrowTypeId.Dictionary)
@@ -291,7 +318,8 @@ namespace Apache.Arrow.Ipc
         private ArrayData[] GetChildren(
             ref RecordBatchEnumerator recordBatchEnumerator,
             Field field,
-            ByteBuffer bodyData)
+            ByteBuffer bodyData,
+            IBufferDecompressor decompressor)
         {
             if (!(field.DataType is NestedType type)) return null;
 
@@ -304,15 +332,15 @@ namespace Apache.Arrow.Ipc
 
                 Field childField = type.Fields[index];
                 ArrayData child = childField.DataType.IsFixedPrimitive()
-                    ? LoadPrimitiveField(ref recordBatchEnumerator, childField, in childFieldNode, bodyData)
-                    : LoadVariableField(ref recordBatchEnumerator, childField, in childFieldNode, bodyData);
+                    ? LoadPrimitiveField(ref recordBatchEnumerator, childField, in childFieldNode, bodyData, decompressor)
+                    : LoadVariableField(ref recordBatchEnumerator, childField, in childFieldNode, bodyData, decompressor);
 
                 children[index] = child;
             }
             return children;
         }
 
-        private ArrowBuffer BuildArrowBuffer(ByteBuffer bodyData, Flatbuf.Buffer buffer)
+        private ArrowBuffer BuildArrowBuffer(ByteBuffer bodyData, Flatbuf.Buffer buffer, IBufferDecompressor decompressor)
         {
             if (buffer.Length <= 0)
             {
@@ -323,7 +351,8 @@ namespace Apache.Arrow.Ipc
             int length = (int)buffer.Length;
 
             var data = bodyData.ToReadOnlyMemory(offset, length);
-            return new ArrowBuffer(data);
+            var decompressed = decompressor.Decompress(data);
+            return new ArrowBuffer(decompressed);
         }
     }
 
