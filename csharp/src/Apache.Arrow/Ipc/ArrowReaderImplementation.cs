@@ -210,7 +210,7 @@ namespace Apache.Arrow.Ipc
             var codec = compression.Value.Codec;
             return codec switch
             {
-                CompressionType.LZ4_FRAME => throw new NotImplementedException("LZ4 decompression is not supported"),
+                CompressionType.LZ4_FRAME => new BufferDecompressor(new Lz4Decompressor(), _allocator),
                 CompressionType.ZSTD => new BufferDecompressor(new ZstdDecompressor(), _allocator),
                 _ => throw new NotImplementedException($"Compression codec {codec} is not supported")
             };
