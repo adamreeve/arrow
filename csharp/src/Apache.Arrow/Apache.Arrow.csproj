@@ -1,10 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>netstandard1.3;netstandard2.0;netcoreapp3.1</TargetFrameworks>
+    <TargetFrameworks>netstandard1.3;netcoreapp3.1;netstandard2.0</TargetFrameworks>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <DefineConstants>$(DefineConstants);UNSAFE_BYTEBUFFER;BYTEBUFFER_NO_BOUNDS_CHECK;ENABLE_SPAN_T</DefineConstants>
-    
+
     <Description>Apache Arrow is a cross-language development platform for in-memory data. It specifies a standardized language-independent columnar memory format for flat and hierarchical data, organized for efficient analytic operations on modern hardware.</Description>
   </PropertyGroup>
 
