@@ -18,6 +18,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using Apache.Arrow.Types;
 
 namespace Apache.Arrow.C
@@ -281,7 +282,7 @@ namespace Apache.Arrow.C
 
                 bool nullable = _cSchema->GetFlag(CArrowSchema.ArrowFlagNullable);
 
-                return new Field(fieldName, GetAsType(), nullable);
+                return new Field(fieldName, GetAsType(), nullable, GetMetadata());
             }
 
             public Schema GetAsSchema()
@@ -289,12 +290,41 @@ namespace Apache.Arrow.C
                 ArrowType fullType = GetAsType();
                 if (fullType is StructType structType)
                 {
-                    return new Schema(structType.Fields, default);
+                    return new Schema(structType.Fields, GetMetadata());
                 }
                 else
                 {
                     throw new ArgumentException("Imported type is not a struct type, so it cannot be converted to a schema.");
                 }
+            }
+
+            private IReadOnlyDictionary<string, string> GetMetadata()
+            {
+                if (_cSchema->metadata == null)
+                {
+                    return null;
+                }
+
+                var metadataPtr = new IntPtr(_cSchema->metadata);
+                var numEntries = Marshal.ReadInt32(metadataPtr);
+                metadataPtr += sizeof(int);
+
+                var metadata = new Dictionary<string, string>();
+                for (var entry = 0; entry < numEntries; ++entry)
+                {
+                    var keySize = Marshal.ReadInt32(metadataPtr);
+                    metadataPtr += sizeof(int);
+                    var key = StringUtil.PtrToStringUtf8((byte*) metadataPtr, keySize);
+                    metadataPtr += keySize;
+
+                    var valueSize = Marshal.ReadInt32(metadataPtr);
+                    metadataPtr += sizeof(int);
+                    var value = StringUtil.PtrToStringUtf8((byte*) metadataPtr, valueSize);
+                    metadataPtr += valueSize;
+
+                    metadata[key] = value;
+                }
+                return metadata;
             }
         }
     }

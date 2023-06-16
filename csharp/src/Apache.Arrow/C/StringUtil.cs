@@ -59,5 +59,19 @@ namespace Apache.Arrow.C
             return System.Text.Encoding.UTF8.GetString(ptr, length);
 #endif
         }
+
+        public static unsafe string PtrToStringUtf8(byte* ptr, int length)
+        {
+#if NETSTANDARD2_1_OR_GREATER
+            return Marshal.PtrToStringUTF8(ptr, length);
+#else
+            if (ptr == null)
+            {
+                return null;
+            }
+
+            return System.Text.Encoding.UTF8.GetString(ptr, length);
+#endif
+        }
     }
 }
