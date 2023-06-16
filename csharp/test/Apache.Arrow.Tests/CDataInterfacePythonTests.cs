@@ -61,7 +61,7 @@ namespace Apache.Arrow.Tests
             using (Py.GIL())
             {
                 var schema = new Schema.Builder()
-                    .Field(f => f.Name("null").DataType(NullType.Default).Nullable(true))
+                    .Field(f => f.Name("null").DataType(NullType.Default).Nullable(true).Metadata("test key", "test value"))
                     .Field(f => f.Name("bool").DataType(BooleanType.Default).Nullable(true))
                     .Field(f => f.Name("i8").DataType(Int8Type.Default).Nullable(true))
                     .Field(f => f.Name("u8").DataType(UInt8Type.Default).Nullable(true))
@@ -105,6 +105,10 @@ namespace Apache.Arrow.Tests
                     // Checking wider characters.
                     .Field(f => f.Name("hello 你好 😄").DataType(BooleanType.Default).Nullable(true))
 
+                    // Add key-value metadata to schema
+                    .Metadata("foo", "bar baz")
+                    .Metadata("abcdef", "123")
+
                     .Build();
                 return schema;
             }
@@ -115,7 +119,13 @@ namespace Apache.Arrow.Tests
             using (Py.GIL())
             {
                 dynamic pa = Py.Import("pyarrow");
-                yield return pa.field("null", pa.GetAttr("null").Invoke(), true);
+                dynamic builtins = Py.Import("builtins");
+                dynamic dict = builtins.GetAttr("dict");
+
+                dynamic fieldMetadata = dict.Invoke();
+                fieldMetadata["test key"] = "test value".ToPython();
+
+                yield return pa.field("null", pa.GetAttr("null").Invoke(), true, fieldMetadata);
                 yield return pa.field("bool", pa.bool_(), true);
                 yield return pa.field("i8", pa.int8(), true);
                 yield return pa.field("u8", pa.uint8(), true);
@@ -165,7 +175,14 @@ namespace Apache.Arrow.Tests
             using (Py.GIL())
             {
                 dynamic pa = Py.Import("pyarrow");
-                return pa.schema(GetPythonFields().ToList());
+                dynamic builtins = Py.Import("builtins");
+                dynamic dict = builtins.GetAttr("dict");
+
+                dynamic schemaMetadata = dict.Invoke();
+                schemaMetadata["foo"] = "bar baz".ToPython();
+                schemaMetadata["abcdef"] = "123".ToPython();
+
+                return pa.schema(GetPythonFields().ToList(), schemaMetadata);
             }
         }
 
@@ -385,6 +402,7 @@ namespace Apache.Arrow.Tests
                     dynamic pa = Py.Import("pyarrow");
                     dynamic exportedPyField = pa.Field._import_from_c(longPtr);
                     Assert.True(exportedPyField == pyField);
+                    Assert.True(exportedPyField.metadata == pyField.metadata);
                 }
 
                 // Python should have called release once `exportedPyField` went out-of-scope.
@@ -414,6 +432,7 @@ namespace Apache.Arrow.Tests
                 dynamic pa = Py.Import("pyarrow");
                 dynamic exportedPySchema = pa.Schema._import_from_c(longPtr);
                 Assert.True(exportedPySchema == pySchema);
+                Assert.True(exportedPySchema.metadata == pySchema.metadata);
             }
 
             // Since we allocated, we are responsible for freeing the pointer.
