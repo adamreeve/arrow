@@ -491,7 +491,7 @@ namespace Apache.Arrow.Tests
                 }
                 else if (arrayLength == 0)
                 {
-                    return
+                    return;
                 }
                 else if (actualValidityBuffer.IsEmpty || expectedValidityBuffer.IsEmpty)
                 {
