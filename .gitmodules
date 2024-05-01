@@ -4,3 +4,6 @@
 [submodule "testing"]
 	path = testing
 	url = https://github.com/apache/arrow-testing
+[submodule "csharp/tools/GtkSharp"]
+	path = csharp/tools/GtkSharp
+	url = https://github.com/GtkSharp/GtkSharp.git

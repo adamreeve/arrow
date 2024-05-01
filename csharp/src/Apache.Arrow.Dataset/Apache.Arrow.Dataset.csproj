@@ -1,0 +1,66 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Provides functionality for reading tabular datasets in Apache Arrow format</Description>
+    <CoreCompileDependsOn>GenerateGobjectBindings;$(CoreCompileDependsOn)</CoreCompileDependsOn>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <TargetFrameworks>net6.0</TargetFrameworks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="GLibSharp" Version="3.24.24.95" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Apache.Arrow\Apache.Arrow.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <GObjectApiFile Include="Apache.Arrow.Dataset-api.xml" />
+    <GObjectGenerated Include="$(IntermediateOutputPath)Generated/GtkSharp/ObjectManager.cs" />
+    <GObjectGenerated Include="$(IntermediateOutputPath)Generated/Apache.Arrow.Dataset/Dataset.cs" />
+    <GObjectGenerated Include="$(IntermediateOutputPath)Generated/Apache.Arrow.Dataset/DatasetFactory.cs" />
+    <GObjectGenerated Include="$(IntermediateOutputPath)Generated/Apache.Arrow.Dataset/FileFormat.cs" />
+    <GObjectGenerated Include="$(IntermediateOutputPath)Generated/Apache.Arrow.Dataset/FileSystem.cs" />
+    <GObjectGenerated Include="$(IntermediateOutputPath)Generated/Apache.Arrow.Dataset/FileSystemDataset.cs" />
+    <GObjectGenerated Include="$(IntermediateOutputPath)Generated/Apache.Arrow.Dataset/FileSystemDatasetFactory.cs" />
+    <GObjectGenerated Include="$(IntermediateOutputPath)Generated/Apache.Arrow.Dataset/FinishOptions.cs" />
+    <GObjectGenerated Include="$(IntermediateOutputPath)Generated/Apache.Arrow.Dataset/LocalFileSystem.cs" />
+    <GObjectGenerated Include="$(IntermediateOutputPath)Generated/Apache.Arrow.Dataset/LocalFileSystemOptions.cs" />
+    <GObjectGenerated Include="$(IntermediateOutputPath)Generated/Apache.Arrow.Dataset/ParquetFileFormat.cs" />
+  </ItemGroup>
+
+  <Target Name="GenerateGobjectBindings" DependsOnTargets="_GenerateGobjectBindings" Condition="'@(GObjectApiFile)' != ''" BeforeTargets="CoreCompile">
+    <ItemGroup>
+      <Compile Include="@(GObjectGenerated)" />
+    </ItemGroup>
+  </Target>
+  <Target
+      Name="_GenerateGobjectBindings"
+      Inputs="$(MSBuildProjectFile);@(GObjectApiFile)"
+      Outputs="@(GObjectGenerated)">
+    <PropertyGroup>
+      <GtkSharpDir>$(MSBuildProjectDirectory)/../../tools/GtkSharp</GtkSharpDir>
+      <GapiCodegenDir>$(GtkSharpDir)/Source/Tools/GapiCodegen</GapiCodegenDir>
+      <ObjectManagerSource>$(IntermediateOutputPath)Generated/GtkSharp/ObjectManager.cs</ObjectManagerSource>
+    </PropertyGroup>
+    <Exec
+        Command="dotnet run --configuration=Release --project=&quot;$(GapiCodegenDir)&quot; --schema=&quot;$(GtkSharpDir)/Source/Libs/Shared/Gapi.xsd&quot; --outdir=&quot;$(IntermediateOutputPath)/Generated&quot; --assembly-name=GArrow --generate=&quot;@(GObjectApiFile)&quot;"
+        Outputs="@(GObjectGenerated)" />
+    <!-- Fix-up hard-coded GtkSharp namespace for ObjectManager. TODO: Fix this upstream? -->
+    <WriteLinesToFile
+          File="$(ObjectManagerSource)"
+          Lines="$([System.IO.File]::ReadAllText($(ObjectManagerSource)).Replace('namespace GtkSharp.GArrow','namespace Apache.Arrow.Dataset'))"
+          Overwrite="true"
+          Encoding="UTF-8" />
+    <WriteLinesToFile
+          File="%(GObjectGenerated.Identity)"
+          Lines="$([System.IO.File]::ReadAllText(%(GObjectGenerated.Identity)).Replace('GtkSharp.GArrow.ObjectManager','Apache.Arrow.Dataset.ObjectManager'))"
+          Overwrite="true"
+          Encoding="UTF-8" />
+  </Target>
+
+</Project>

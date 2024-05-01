@@ -27,6 +27,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Apache.Arrow.Flight.Sql.Tes
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Apache.Arrow.Flight.Sql", "src\Apache.Arrow.Flight.Sql\Apache.Arrow.Flight.Sql.csproj", "{2ADE087A-B424-4895-8CC5-10170D10BA62}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Apache.Arrow.Dataset", "src\Apache.Arrow.Dataset\Apache.Arrow.Dataset.csproj", "{0E0A4F80-41B7-45E3-BA36-75478E573B53}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Apache.Arrow.Dataset.Tests", "test\Apache.Arrow.Dataset.Tests\Apache.Arrow.Dataset.Tests.csproj", "{208F6782-8C2B-49C0-835A-C4E12A67018E}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -81,6 +85,14 @@ Global
 		{2ADE087A-B424-4895-8CC5-10170D10BA62}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{2ADE087A-B424-4895-8CC5-10170D10BA62}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{2ADE087A-B424-4895-8CC5-10170D10BA62}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0E0A4F80-41B7-45E3-BA36-75478E573B53}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0E0A4F80-41B7-45E3-BA36-75478E573B53}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0E0A4F80-41B7-45E3-BA36-75478E573B53}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0E0A4F80-41B7-45E3-BA36-75478E573B53}.Release|Any CPU.Build.0 = Release|Any CPU
+		{208F6782-8C2B-49C0-835A-C4E12A67018E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{208F6782-8C2B-49C0-835A-C4E12A67018E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{208F6782-8C2B-49C0-835A-C4E12A67018E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{208F6782-8C2B-49C0-835A-C4E12A67018E}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

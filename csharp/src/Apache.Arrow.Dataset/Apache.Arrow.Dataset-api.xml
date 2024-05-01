@@ -1,0 +1,135 @@
+<?xml version="1.0"?>
+<api parser_version="2">
+  <namespace name="Apache.Arrow.Dataset" library="Library.GArrow">
+    <!-- Should this be in the base Apache.Arrow library? -->
+    <object name="FileSystem" cname="GArrowFileSystem" parent="GObject">
+      <class_struct cname="GArrowFileSystemClass">
+        <field name="ParentClass" cname="parent_class" type="GObjectClass" />
+      </class_struct>
+      <method name="GetType" cname="garrow_file_system_get_type" shared="true">
+        <return-type type="GType" />
+      </method>
+    </object>
+    <object name="LocalFileSystemOptions" cname="GArrowLocalFileSystemOptions" parent="GObject">
+      <class_struct cname="GArrowLocalFileSystemOptionsClass">
+        <field name="ParentClass" cname="parent_class" type="GObjectClass" />
+      </class_struct>
+      <constructor cname="garrow_local_file_system_options_new">
+        <parameters />
+      </constructor>
+      <method name="GetType" cname="garrow_local_file_system_options_get_type" shared="true">
+        <return-type type="GType" />
+      </method>
+    </object>
+    <object name="LocalFileSystem" cname="GArrowLocalFileSystem" parent="GArrowFileSystem">
+      <class_struct cname="GArrowLocalFileSystemClass">
+        <field name="ParentClass" cname="parent_class" type="GArrowFileSystemClass" />
+      </class_struct>
+      <constructor cname="garrow_local_file_system_new">
+        <parameters>
+          <parameter type="GArrowLocalFileSystemOptions*" name="options" />
+        </parameters>
+      </constructor>
+      <method name="GetType" cname="garrow_local_file_system_get_type" shared="true">
+        <return-type type="GType" />
+      </method>
+    </object>
+  </namespace>
+  <namespace name="Apache.Arrow.Dataset" library="Library.GArrowDataset">
+    <object name="FileFormat" cname="GADatasetFileFormat" parent="GObject">
+      <class_struct cname="GADatasetFileFormatClass">
+        <field name="ParentClass" cname="parent_class" type="GObjectClass" />
+      </class_struct>
+      <method name="GetType" cname="gadataset_file_format_get_type" shared="true">
+        <return-type type="GType" />
+      </method>
+    </object>
+    <object name="ParquetFileFormat" cname="GADatasetParquetFileFormat" parent="GADatasetFileFormat" >
+      <class_struct cname="GADatasetParquetFileFormatClass">
+        <field name="ParentClass" cname="parent_class" type="GADatasetFileFormatClass" />
+      </class_struct>
+      <constructor cname="gadataset_parquet_file_format_new">
+        <parameters />
+      </constructor>
+      <method name="GetType" cname="gadataset_parquet_file_format_get_type" shared="true">
+        <return-type type="GType" />
+      </method>
+    </object>
+    <object name="Dataset" cname="GADatasetDataset" parent="GObject">
+      <class_struct cname="GADatasetDatasetClass">
+        <field name="ParentClass" cname="parent_class" type="GObjectClass" />
+      </class_struct>
+      <method name="GetType" cname="gadataset_dataset_get_type" shared="true">
+        <return-type type="GType" />
+      </method>
+    </object>
+    <object name="FileSystemDataset" cname="GADatasetFileSystemDataset" parent="GADatasetDataset">
+      <class_struct cname="GADatasetFileSystemDatasetClass">
+        <field name="ParentClass" cname="parent_class" type="GADatasetDatasetClass" />
+      </class_struct>
+      <method name="GetType" cname="gadataset_file_system_dataset_get_type" shared="true">
+        <return-type type="GType" />
+      </method>
+    </object>
+    <object name="FinishOptions" cname="GADatasetFinishOptions" parent="GObject">
+      <class_struct cname="GADatasetFinishOptionsClass">
+        <field name="ParentClass" cname="parent_class" type="GObjectClass" />
+      </class_struct>
+      <constructor cname="gadataset_finish_options_new">
+        <parameters />
+      </constructor>
+      <method name="GetType" cname="gadataset_finish_options_get_type" shared="true">
+        <return-type type="GType" />
+      </method>
+    </object>
+    <object name="DatasetFactory" cname="GADatasetDatasetFactory" parent="GObject">
+      <class_struct cname="GADatasetDatasetFactoryClass">
+        <field name="ParentClass" cname="parent_class" type="GObjectClass" />
+      </class_struct>
+      <method name="GetType" cname="gadataset_dataset_factory_get_type" shared="true">
+        <return-type type="GType" />
+      </method>
+      <method name="Finish" cname="gadataset_dataset_factory_finish">
+        <return-type type="GADatasetDataset*" owned="true" />
+        <parameters>
+          <parameter type="GADatasetFinishOptions*" name="options" />
+          <parameter type="GError**" name="error" />
+        </parameters>
+      </method>
+    </object>
+    <object name="FileSystemDatasetFactory" cname="GADatasetFileSystemDatasetFactory" parent="GADatasetDatasetFactory" >
+      <class_struct cname="GADatasetFileSystemDatasetFactoryClass">
+        <field name="ParentClass" cname="parent_class" type="GADatasetDatasetFactoryClass" />
+      </class_struct>
+      <constructor cname="gadataset_file_system_dataset_factory_new">
+        <parameters>
+          <parameter type="GADatasetFileFormat*" name="fileFormat" />
+        </parameters>
+      </constructor>
+      <method name="GetType" cname="gadataset_file_system_dataset_factory_get_type" shared="true">
+        <return-type type="GType" />
+      </method>
+      <method name="SetFileSystem" cname="gadataset_file_system_dataset_factory_set_file_system">
+        <return-type type="gboolean" />
+        <parameters>
+          <parameter type="GArrowFileSystem*" name="fileSystem" />
+          <parameter type="GError**" name="error" />
+        </parameters>
+      </method>
+      <method name="AddPath" cname="gadataset_file_system_dataset_factory_add_path">
+        <return-type type="gboolean" />
+        <parameters>
+          <parameter type="const-gchar*" name="path" />
+          <parameter type="GError**" name="error" />
+        </parameters>
+      </method>
+      <method name="Finish" cname="gadataset_file_system_dataset_factory_finish" new_flag="true">
+        <return-type type="GADatasetFileSystemDataset*" owned="true" />
+        <parameters>
+          <parameter type="GADatasetFinishOptions*" name="options" />
+          <parameter type="GError**" name="error" />
+        </parameters>
+      </method>
+    </object>
+  </namespace>
+</api>
