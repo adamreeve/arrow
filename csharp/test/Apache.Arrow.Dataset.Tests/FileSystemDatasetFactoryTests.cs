@@ -1,11 +1,18 @@
+using System.Threading.Tasks;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Apache.Arrow.Dataset.Tests;
 
 public class FileSystemDatasetFactoryTests
 {
+    public FileSystemDatasetFactoryTests(ITestOutputHelper testOutputHelper)
+    {
+        _testOutputHelper = testOutputHelper;
+    }
+
     [Fact]
-    public void CreateParquetFileSystemDataset()
+    public async Task CreateParquetFileSystemDataset()
     {
         var fileFormat = new ParquetFileFormat();
         using var datasetFactory = new FileSystemDatasetFactory(fileFormat);
@@ -14,5 +21,13 @@ public class FileSystemDatasetFactoryTests
         using var dataset = datasetFactory.Finish(null);
 
         Assert.NotNull(dataset);
+
+        using var reader = dataset.GetRecordBatchReader();
+        while (await reader.ReadNextRecordBatchAsync() is { } batch)
+        {
+            _testOutputHelper.WriteLine(batch.ToString());
+        }
     }
+
+    private readonly ITestOutputHelper _testOutputHelper;
 }

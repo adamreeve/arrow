@@ -34,6 +34,14 @@
         <return-type type="GType" />
       </method>
     </object>
+    <object name="RecordBatchReader" cname="GArrowRecordBatchReader" parent="GObject" internal="true">
+      <method name="Export" cname="garrow_record_batch_reader_export">
+        <return-type type="gpointer" />
+        <parameters>
+          <parameter type="GError**" name="error" />
+        </parameters>
+      </method>
+    </object>
   </namespace>
   <namespace name="Apache.Arrow.Dataset" library="Library.GArrowDataset">
     <object name="FileFormat" cname="GADatasetFileFormat" parent="GObject">
@@ -61,6 +69,12 @@
       </class_struct>
       <method name="GetType" cname="gadataset_dataset_get_type" shared="true">
         <return-type type="GType" />
+      </method>
+      <method name="ToRecordBatchReader" cname="gadataset_dataset_to_record_batch_reader" accessibility="private">
+        <return-type type="GArrowRecordBatchReader*" owned="true" />
+        <parameters>
+          <parameter type="GError**" name="error" />
+        </parameters>
       </method>
     </object>
     <object name="FileSystemDataset" cname="GADatasetFileSystemDataset" parent="GADatasetDataset">

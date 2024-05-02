@@ -31,6 +31,7 @@
     <GObjectGenerated Include="$(IntermediateOutputPath)Generated/Apache.Arrow.Dataset/LocalFileSystem.cs" />
     <GObjectGenerated Include="$(IntermediateOutputPath)Generated/Apache.Arrow.Dataset/LocalFileSystemOptions.cs" />
     <GObjectGenerated Include="$(IntermediateOutputPath)Generated/Apache.Arrow.Dataset/ParquetFileFormat.cs" />
+    <GObjectGenerated Include="$(IntermediateOutputPath)Generated/Apache.Arrow.Dataset/RecordBatchReader.cs" />
   </ItemGroup>
 
   <Target Name="GenerateGobjectBindings" DependsOnTargets="_GenerateGobjectBindings" Condition="'@(GObjectApiFile)' != ''" BeforeTargets="CoreCompile">
@@ -43,12 +44,13 @@
       Inputs="$(MSBuildProjectFile);@(GObjectApiFile)"
       Outputs="@(GObjectGenerated)">
     <PropertyGroup>
-      <GtkSharpDir>$(MSBuildProjectDirectory)/../../tools/GtkSharp</GtkSharpDir>
+      <ToolsDir>$(MSBuildProjectDirectory)/../../tools</ToolsDir>
+      <GtkSharpDir>$(ToolsDir)/GtkSharp</GtkSharpDir>
       <GapiCodegenDir>$(GtkSharpDir)/Source/Tools/GapiCodegen</GapiCodegenDir>
       <ObjectManagerSource>$(IntermediateOutputPath)Generated/GtkSharp/ObjectManager.cs</ObjectManagerSource>
     </PropertyGroup>
     <Exec
-        Command="dotnet run --configuration=Release --project=&quot;$(GapiCodegenDir)&quot; --schema=&quot;$(GtkSharpDir)/Source/Libs/Shared/Gapi.xsd&quot; --outdir=&quot;$(IntermediateOutputPath)/Generated&quot; --assembly-name=GArrow --generate=&quot;@(GObjectApiFile)&quot;"
+        Command="dotnet run --configuration=Release --project=&quot;$(GapiCodegenDir)&quot; --schema=&quot;$(ToolsDir)/GApiSchema.xsd&quot; --outdir=&quot;$(IntermediateOutputPath)/Generated&quot; --assembly-name=GArrow --generate=&quot;@(GObjectApiFile)&quot;"
         Outputs="@(GObjectGenerated)" />
     <!-- Fix-up hard-coded GtkSharp namespace for ObjectManager. TODO: Fix this upstream? -->
     <WriteLinesToFile
