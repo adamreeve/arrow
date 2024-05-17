@@ -2907,6 +2907,13 @@ macro(build_absl)
   set(ABSL_BUILD_BYPRODUCTS)
   set(ABSL_LIBRARIES)
 
+  if (CMAKE_COMPILER_IS_GNUCC AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13.0)
+    find_program(PATCH patch REQUIRED)
+    set(ABSL_PATCH_COMMAND ${PATCH} -p1 -i ${CMAKE_CURRENT_LIST_DIR}/absl.diff)
+  else()
+    set(ABSL_PATCH_COMMAND)
+  endif()
+
   # Abseil produces the following libraries, each is fairly small, but there
   # are (as you can see), many of them. We need to add the libraries first,
   # and then describe how they depend on each other. The list can be
@@ -3821,6 +3828,7 @@ macro(build_absl)
                       ${EP_COMMON_OPTIONS}
                       URL ${ABSL_SOURCE_URL}
                       URL_HASH "SHA256=${ARROW_ABSL_BUILD_SHA256_CHECKSUM}"
+                      PATCH_COMMAND ${ABSL_PATCH_COMMAND}
                       CMAKE_ARGS ${ABSL_CMAKE_ARGS}
                       BUILD_BYPRODUCTS ${ABSL_BUILD_BYPRODUCTS})
 
