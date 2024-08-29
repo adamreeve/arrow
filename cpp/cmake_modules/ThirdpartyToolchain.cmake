@@ -5064,7 +5064,7 @@ macro(build_awssdk)
   set(AWSSDK_CMAKE_ARGS
       ${AWSSDK_COMMON_CMAKE_ARGS}
       -DBUILD_DEPS=OFF
-      -DBUILD_ONLY=config\\$<SEMICOLON>s3\\$<SEMICOLON>transfer\\$<SEMICOLON>identity-management\\$<SEMICOLON>sts
+      -DBUILD_ONLY=config\\$<SEMICOLON>s3\\$<SEMICOLON>s3-crt\\$<SEMICOLON>transfer\\$<SEMICOLON>identity-management\\$<SEMICOLON>sts
       -DMINIMIZE_SIZE=ON)
   # Remove unused directories to save build directory storage.
   # 807MB -> 31MB
@@ -5099,6 +5099,7 @@ macro(build_awssdk)
       aws-cpp-sdk-sts
       aws-cpp-sdk-cognito-identity
       aws-cpp-sdk-s3
+      aws-cpp-sdk-s3-crt
       aws-cpp-sdk-core
       aws-crt-cpp
       aws-c-s3
@@ -5360,6 +5361,7 @@ macro(build_awssdk)
                                        ${AWS_CPP_SDK_CORE_STATIC_LIBRARY}
                                        ${AWS_CPP_SDK_IDENTITY_MANAGEMENT_STATIC_LIBRARY}
                                        ${AWS_CPP_SDK_S3_STATIC_LIBRARY}
+                                       ${AWS_CPP_SDK_S3_CRT_STATIC_LIBRARY}
                                        ${AWS_CPP_SDK_STS_STATIC_LIBRARY}
                       DEPENDS aws_crt_cpp_ep)
   foreach(_AWSSDK_LIB ${_AWSSDK_LIBS})
