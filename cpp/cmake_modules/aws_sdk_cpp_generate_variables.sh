@@ -58,14 +58,26 @@ find ${base_name} -mindepth 1 -maxdepth 1 -type d | \
   sort | \
   grep -v cmake | \
   grep -v toolchains | \
-  grep -v aws-cpp-sdk-cognito-identity | \
+  grep -v src | \
+  grep -v generated | \
+  sed -E -e "s,^${base_name}/,    ,g" >> ${output}
+
+find ${base_name}/src -mindepth 1 -maxdepth 1 -type d | \
+  sort | \
   grep -v aws-cpp-sdk-core | \
-  grep -v aws-cpp-sdk-config | \
-  grep -v aws-cpp-sdk-s3 | \
   grep -v aws-cpp-sdk-transfer | \
   grep -v aws-cpp-sdk-identity-management | \
+  sed -E -e "s,^${base_name}/,    ,g" >> ${output}
+
+find ${base_name}/generated/src -mindepth 1 -maxdepth 1 -type d | \
+  sort | \
+  grep -v aws-cpp-sdk-cognito-identity | \
+  grep -v aws-cpp-sdk-config | \
+  grep -v aws-cpp-sdk-s3 | \
+  grep -v aws-cpp-sdk-s3-crt | \
   grep -v aws-cpp-sdk-sts | \
   sed -E -e "s,^${base_name}/,    ,g" >> ${output}
+
 echo ")" >> ${output}
 
 rm -rf ${base_name}
