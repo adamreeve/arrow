@@ -581,7 +581,7 @@ if(DEFINED ENV{ARROW_AWS_LC_URL})
   set(AWS_LC_SOURCE_URL "$ENV{ARROW_AWS_LC_URL}")
 else()
   set_urls(AWS_LC_SOURCE_URL
-           "https://github.com/awslabs/aws-lc/archive/${ARROW_AWS_LC_BUILD_VERSION}.tar.gz"
+           "https://github.com/aws/aws-lc/archive/${ARROW_AWS_LC_BUILD_VERSION}.tar.gz"
   )
 endif()
 
@@ -5210,7 +5210,7 @@ macro(build_awssdk)
 
     set(AWS_LC_CMAKE_ARGS ${AWSSDK_COMMON_CMAKE_ARGS})
     list(APPEND AWS_LC_CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${AWS_LC_PREFIX}
-         -DCMAKE_C_FLAGS=${AWS_LC_C_FLAGS})
+      -DCMAKE_C_FLAGS=${AWS_LC_C_FLAGS} -DDISABLE_GO=ON -DDISABLE_PERL=ON)
 
     externalproject_add(aws_lc_ep
                         ${EP_COMMON_OPTIONS}
