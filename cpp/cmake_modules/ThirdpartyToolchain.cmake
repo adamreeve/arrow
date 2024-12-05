@@ -5210,7 +5210,7 @@ macro(build_awssdk)
 
     set(AWS_LC_CMAKE_ARGS ${AWSSDK_COMMON_CMAKE_ARGS})
     list(APPEND AWS_LC_CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${AWS_LC_PREFIX}
-      -DCMAKE_C_FLAGS=${AWS_LC_C_FLAGS} -DDISABLE_GO=ON -DDISABLE_PERL=ON)
+      -DCMAKE_C_FLAGS=${AWS_LC_C_FLAGS})
 
     externalproject_add(aws_lc_ep
                         ${EP_COMMON_OPTIONS}
