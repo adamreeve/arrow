@@ -849,8 +849,8 @@ if(ARROW_FILESYSTEM)
     list(APPEND ARROW_FILESYSTEM_SRCS filesystem/hdfs.cc)
   endif()
   if(ARROW_S3)
-    list(APPEND ARROW_FILESYSTEM_SRCS filesystem/s3fs.cc)
-    set_source_files_properties(filesystem/s3fs.cc
+    list(APPEND ARROW_FILESYSTEM_SRCS filesystem/s3fs.cc filesystem/s3crtfs.cc)
+    set_source_files_properties(filesystem/s3fs.cc filesystem/s3crtfs.cc
                                 PROPERTIES SKIP_PRECOMPILE_HEADERS ON
                                            SKIP_UNITY_BUILD_INCLUSION ON)
   endif()
