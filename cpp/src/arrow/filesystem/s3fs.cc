@@ -613,9 +613,10 @@ class WrappedRetryStrategy : public Aws::Client::RetryStrategy {
   std::shared_ptr<S3RetryStrategy> s3_retry_strategy_;
 };
 
-class S3Client : public Aws::S3::S3Client {
+template <typename TClient>
+class S3Client : public TClient {
  public:
-  using Aws::S3::S3Client::S3Client;
+  using TClient::TClient;
 
   static inline constexpr auto kBucketRegionHeaderName = "x-amz-bucket-region";
 
@@ -816,12 +817,14 @@ void DisableRedirects(Aws::Client::ClientConfiguration* c) {
 //
 // See: GH-36346, GH-15054.
 
+template <typename TClient>
 class S3ClientFinalizer;
 
+template <typename TClient>
 class S3ClientLock {
  public:
-  S3Client* get() { return client_.get(); }
-  S3Client* operator->() { return client_.get(); }
+  S3Client<TClient>* get() { return client_.get(); }
+  S3Client<TClient>* operator->() { return client_.get(); }
 
   // Move this S3ClientLock into a temporary instance
   //
@@ -840,13 +843,14 @@ class S3ClientLock {
   S3ClientLock Move() { return std::move(*this); }
 
  protected:
-  friend class S3ClientHolder;
+  // friend class S3ClientHolder;
 
   // Locks the finalizer until the S3ClientLock gets out of scope.
   std::shared_lock<std::shared_mutex> lock_;
-  std::shared_ptr<S3Client> client_;
+  std::shared_ptr<TClient> client_;
 };
 
+template <typename TClient>
 class S3ClientHolder {
  public:
   /// \brief Return a RAII guard guaranteeing a S3Client is safe for use
@@ -854,36 +858,40 @@ class S3ClientHolder {
   /// S3 finalization will be deferred until the returned S3ClientLock
   /// goes out of scope.
   /// An error is returned if S3 is already finalized.
-  Result<S3ClientLock> Lock();
+  Result<S3ClientLock<TClient>> Lock();
 
-  S3ClientHolder(std::weak_ptr<S3ClientFinalizer> finalizer,
-                 std::shared_ptr<S3Client> client)
+  S3ClientHolder(std::weak_ptr<S3ClientFinalizer<TClient>> finalizer,
+                 std::shared_ptr<TClient> client)
       : finalizer_(std::move(finalizer)), client_(std::move(client)) {}
 
   void Finalize();
 
  protected:
   std::mutex mutex_;
-  std::weak_ptr<S3ClientFinalizer> finalizer_;
-  std::shared_ptr<S3Client> client_;
+  std::weak_ptr<S3ClientFinalizer<TClient>> finalizer_;
+  std::shared_ptr<TClient> client_;
 };
 
-class S3ClientFinalizer : public std::enable_shared_from_this<S3ClientFinalizer> {
-  using ClientHolderList = std::vector<std::weak_ptr<S3ClientHolder>>;
+template <typename TClient>
+class S3ClientFinalizer
+    : public std::enable_shared_from_this<S3ClientFinalizer<TClient>> {
+  using ClientHolderList = std::vector<std::weak_ptr<S3ClientHolder<TClient>>>;
 
  public:
-  Result<std::shared_ptr<S3ClientHolder>> AddClient(std::shared_ptr<S3Client> client) {
+  Result<std::shared_ptr<S3ClientHolder<TClient>>> AddClient(
+      std::shared_ptr<TClient> client) {
     std::unique_lock lock(mutex_);
     if (finalized_) {
       return ErrorS3Finalized();
     }
 
-    auto holder = std::make_shared<S3ClientHolder>(shared_from_this(), std::move(client));
+    auto holder =
+        std::make_shared<S3ClientHolder<TClient>>(shared_from_this(), std::move(client));
 
     // Remove expired entries before adding new one
     auto end = std::remove_if(
         holders_.begin(), holders_.end(),
-        [](std::weak_ptr<S3ClientHolder> holder) { return holder.expired(); });
+        [](std::weak_ptr<S3ClientHolder<TClient>> holder) { return holder.expired(); });
     holders_.erase(end, holders_.end());
     holders_.emplace_back(holder);
     return holder;
@@ -909,16 +917,17 @@ class S3ClientFinalizer : public std::enable_shared_from_this<S3ClientFinalizer>
   auto LockShared() { return std::shared_lock(mutex_); }
 
  protected:
-  friend class S3ClientHolder;
+  // friend class S3ClientHolder;
 
   std::shared_mutex mutex_;
   ClientHolderList holders_;
   bool finalized_ = false;
 };
 
-Result<S3ClientLock> S3ClientHolder::Lock() {
-  std::shared_ptr<S3ClientFinalizer> finalizer;
-  std::shared_ptr<S3Client> client;
+template <typename TClient>
+Result<S3ClientLock<TClient>> S3ClientHolder<TClient>::Lock() {
+  std::shared_ptr<S3ClientFinalizer<TClient>> finalizer;
+  std::shared_ptr<TClient> client;
   {
     std::unique_lock lock(mutex_);
     finalizer = finalizer_.lock();
@@ -939,7 +948,7 @@ Result<S3ClientLock> S3ClientHolder::Lock() {
     return ErrorS3Finalized();
   }
 
-  S3ClientLock client_lock;
+  S3ClientLock<TClient> client_lock;
   // Lock the finalizer before examining it
   client_lock.lock_ = finalizer->LockShared();
   if (finalizer->finalized_) {
@@ -951,8 +960,9 @@ Result<S3ClientLock> S3ClientHolder::Lock() {
   return client_lock;
 }
 
-void S3ClientHolder::Finalize() {
-  std::shared_ptr<S3Client> client;
+template <typename TClient>
+void S3ClientHolder<TClient>::Finalize() {
+  std::shared_ptr<TClient> client;
   {
     std::unique_lock lock(mutex_);
     client = std::move(client_);
@@ -960,14 +970,16 @@ void S3ClientHolder::Finalize() {
   // Do not hold mutex while ~S3Client potentially runs
 }
 
-std::shared_ptr<S3ClientFinalizer> GetClientFinalizer() {
-  static auto finalizer = std::make_shared<S3ClientFinalizer>();
+template <typename TClient>
+std::shared_ptr<S3ClientFinalizer<TClient>> GetClientFinalizer() {
+  static auto finalizer = std::make_shared<S3ClientFinalizer<TClient>>();
   return finalizer;
 }
 
-Result<std::shared_ptr<S3ClientHolder>> GetClientHolder(
-    std::shared_ptr<S3Client> client) {
-  return GetClientFinalizer()->AddClient(std::move(client));
+template <typename TClient>
+Result<std::shared_ptr<S3ClientHolder<TClient>>> GetClientHolder(
+    std::shared_ptr<TClient> client) {
+  return GetClientFinalizer<TClient>()->AddClient(std::move(client));
 }
 
 // -----------------------------------------------------------------------
@@ -2227,7 +2239,77 @@ void FileObjectToInfo(const S3Model::Object& obj, FileInfo* info) {
 // -----------------------------------------------------------------------
 // S3 filesystem implementation
 
-class S3FileSystem::Impl : public std::enable_shared_from_this<S3FileSystem::Impl> {
+namespace internal {
+
+class S3FileSystemImplBase {
+ public:
+  virtual ~S3FileSystemImplBase() = default;
+
+  virtual const S3Options& options() const = 0;
+
+  virtual std::string region() const = 0;
+
+  virtual Status Init() = 0;
+
+  virtual Status CopyObject(const S3Path& src_path, const S3Path& dest_path) = 0;
+
+  virtual Result<bool> IsEmptyDirectory(
+      const std::string& bucket, const std::string& key,
+      const S3Model::HeadObjectOutcome* previous_outcome = nullptr) = 0;
+
+  virtual Result<bool> IsEmptyDirectory(
+      const S3Path& path,
+      const S3Model::HeadObjectOutcome* previous_outcome = nullptr) = 0;
+
+  virtual Result<bool> IsNonEmptyDirectory(const S3Path& path) = 0;
+
+  virtual Future<> DeleteDirContentsAsync(const std::string& bucket,
+                                          const std::string& key) = 0;
+
+  virtual FileInfoGenerator GetFileInfoGenerator(const FileSelector& select) = 0;
+
+  virtual Status CreateBucket(const std::string& bucket) = 0;
+
+  virtual Result<S3Backend> GetBackend() = 0;
+
+  virtual Result<bool> BucketExists(const std::string& bucket) = 0;
+
+  virtual Status CreateEmptyDir(const std::string& bucket, std::string_view key_view) = 0;
+
+  virtual Status DeleteObject(const std::string& bucket, const std::string& key) = 0;
+
+  virtual Status EnsureParentExists(const S3Path& path) = 0;
+
+  virtual Status EnsureDirectoryExists(const S3Path& path) = 0;
+
+  virtual Result<std::shared_ptr<::arrow::io::RandomAccessFile>> OpenInputFile(
+      const std::string& s, S3FileSystem* fs) = 0;
+
+  virtual Result<std::shared_ptr<::arrow::io::RandomAccessFile>> OpenInputFile(
+      const FileInfo& info, S3FileSystem* fs) = 0;
+
+  virtual Result<std::shared_ptr<io::OutputStream>> OpenOutputStream(
+      const std::string& s, const std::shared_ptr<const KeyValueMetadata>& metadata,
+      const io::IOContext& io_context) = 0;
+
+  virtual Future<> DoDeleteDirContentsAsync(const std::string& bucket,
+                                            const std::string& key) = 0;
+
+  virtual Result<std::vector<std::string>> ProcessListBuckets(
+      const Aws::S3::Model::ListBucketsOutcome& outcome) = 0;
+
+  virtual Status DeleteFile(const std::string& s) = 0;
+
+  virtual Status DeleteDir(const std::string& s) = 0;
+
+  virtual Result<FileInfo> GetFileInfo(const std::string& s) = 0;
+};
+
+}  // namespace internal
+
+template <typename ClientType>
+class Impl : public S3FileSystem::ImplBase,
+             public std::enable_shared_from_this<S3FileSystem::ImplBase> {
  public:
   ClientBuilder builder_;
   io::IOContext io_context_;
@@ -2241,11 +2323,11 @@ class S3FileSystem::Impl : public std::enable_shared_from_this<S3FileSystem::Imp
   explicit Impl(S3Options options, io::IOContext io_context)
       : builder_(std::move(options)), io_context_(io_context) {}
 
-  Status Init() { return builder_.BuildClient(io_context_).Value(&holder_); }
+  Status Init() override { return builder_.BuildClient(io_context_).Value(&holder_); }
 
-  const S3Options& options() const { return builder_.options(); }
+  const S3Options& options() const override { return builder_.options(); }
 
-  std::string region() const {
+  std::string region() const override {
     return std::string(FromAwsString(builder_.config().region));
   }
 
@@ -2260,7 +2342,7 @@ class S3FileSystem::Impl : public std::enable_shared_from_this<S3FileSystem::Imp
     return *backend_;
   }
 
-  Result<S3Backend> GetBackend() {
+  Result<S3Backend> GetBackend() override {
     if (!backend_) {
       ARROW_ASSIGN_OR_RAISE(auto client_lock, holder_->Lock());
 
@@ -2274,7 +2356,7 @@ class S3FileSystem::Impl : public std::enable_shared_from_this<S3FileSystem::Imp
   }
 
   // Tests to see if a bucket exists
-  Result<bool> BucketExists(const std::string& bucket) {
+  Result<bool> BucketExists(const std::string& bucket) override {
     ARROW_ASSIGN_OR_RAISE(auto client_lock, holder_->Lock());
 
     S3Model::HeadBucketRequest req;
@@ -2293,7 +2375,7 @@ class S3FileSystem::Impl : public std::enable_shared_from_this<S3FileSystem::Imp
   }
 
   // Create a bucket.  Successful if bucket already exists.
-  Status CreateBucket(const std::string& bucket) {
+  Status CreateBucket(const std::string& bucket) override {
     // Check bucket exists first.
     {
       S3Model::HeadBucketRequest req;
@@ -2339,7 +2421,7 @@ class S3FileSystem::Impl : public std::enable_shared_from_this<S3FileSystem::Imp
   }
 
   // Create a directory-like object with empty contents.  Successful if already exists.
-  Status CreateEmptyDir(const std::string& bucket, std::string_view key_view) {
+  Status CreateEmptyDir(const std::string& bucket, std::string_view key_view) override {
     ARROW_ASSIGN_OR_RAISE(auto client_lock, holder_->Lock());
 
     auto key = internal::EnsureTrailingSlash(key_view);
@@ -2353,7 +2435,7 @@ class S3FileSystem::Impl : public std::enable_shared_from_this<S3FileSystem::Imp
         "PutObject", client_lock.Move()->PutObject(req));
   }
 
-  Status DeleteObject(const std::string& bucket, const std::string& key) {
+  Status DeleteObject(const std::string& bucket, const std::string& key) override {
     ARROW_ASSIGN_OR_RAISE(auto client_lock, holder_->Lock());
 
     S3Model::DeleteObjectRequest req;
@@ -2364,7 +2446,7 @@ class S3FileSystem::Impl : public std::enable_shared_from_this<S3FileSystem::Imp
         "DeleteObject", client_lock.Move()->DeleteObject(req));
   }
 
-  Status CopyObject(const S3Path& src_path, const S3Path& dest_path) {
+  Status CopyObject(const S3Path& src_path, const S3Path& dest_path) override {
     ARROW_ASSIGN_OR_RAISE(auto client_lock, holder_->Lock());
 
     S3Model::CopyObjectRequest req;
@@ -2391,6 +2473,125 @@ class S3FileSystem::Impl : public std::enable_shared_from_this<S3FileSystem::Imp
         "CopyObject", client_lock.Move()->CopyObject(req));
   }
 
+  Status DeleteFile(const std::string& s) override {
+    ARROW_ASSIGN_OR_RAISE(auto client_lock, holder_->Lock());
+
+    ARROW_ASSIGN_OR_RAISE(auto path, S3Path::FromString(s));
+    RETURN_NOT_OK(ValidateFilePath(path));
+
+    // Check the object exists
+    S3Model::HeadObjectRequest req;
+    req.SetBucket(ToAwsString(path.bucket));
+    req.SetKey(ToAwsString(path.key));
+
+    auto outcome = client_lock.Move()->HeadObject(req);
+    if (!outcome.IsSuccess()) {
+      if (IsNotFound(outcome.GetError())) {
+        return PathNotFound(path);
+      } else {
+        return ErrorToStatus(
+            std::forward_as_tuple("When getting information for key '", path.key,
+                                  "' in bucket '", path.bucket, "': "),
+            "HeadObject", outcome.GetError());
+      }
+    }
+    // Object found, delete it
+    RETURN_NOT_OK(DeleteObject(path.bucket, path.key));
+    // Parent may be implicitly deleted if it became empty, recreate it
+    return EnsureParentExists(path);
+  }
+
+  Status DeleteDir(const std::string& s) override {
+    ARROW_ASSIGN_OR_RAISE(auto path, S3Path::FromString(s));
+    if (path.empty()) {
+      return Status::NotImplemented("Cannot delete all S3 buckets");
+    }
+    RETURN_NOT_OK(DeleteDirContentsAsync(path.bucket, path.key).status());
+    if (path.key.empty() && options().allow_bucket_deletion) {
+      // Delete bucket
+      ARROW_ASSIGN_OR_RAISE(auto client_lock, holder_->Lock());
+      S3Model::DeleteBucketRequest req;
+      req.SetBucket(ToAwsString(path.bucket));
+      return OutcomeToStatus(
+          std::forward_as_tuple("When deleting bucket '", path.bucket, "': "),
+          "DeleteBucket", client_lock.Move()->DeleteBucket(req));
+    } else if (path.key.empty()) {
+      return Status::IOError(
+          "Would delete bucket '", path.bucket, "'. ",
+          "To delete buckets, enable the allow_bucket_deletion option.");
+    } else {
+      // Delete "directory"
+      RETURN_NOT_OK(DeleteObject(path.bucket, path.key + kSep));
+      // Parent may be implicitly deleted if it became empty, recreate it
+      return EnsureParentExists(path);
+    }
+  }
+
+  Result<FileInfo> GetFileInfo(const std::string& s) override {
+    ARROW_ASSIGN_OR_RAISE(auto client_lock, holder_->Lock());
+
+    ARROW_ASSIGN_OR_RAISE(auto path, S3Path::FromString(s));
+    FileInfo info;
+    info.set_path(s);
+
+    if (path.empty()) {
+      // It's the root path ""
+      info.set_type(FileType::Directory);
+      return info;
+    } else if (path.key.empty()) {
+      // It's a bucket
+      S3Model::HeadBucketRequest req;
+      req.SetBucket(ToAwsString(path.bucket));
+
+      auto outcome = client_lock.Move()->HeadBucket(req);
+      if (!outcome.IsSuccess()) {
+        // impl_->GetOrSetBackend(outcome.GetError()); // FIXME
+        if (!IsNotFound(outcome.GetError())) {
+          const auto msg = "When getting information for bucket '" + path.bucket + "': ";
+          return ErrorToStatus(msg, "HeadBucket", outcome.GetError(), options().region);
+        }
+        info.set_type(FileType::NotFound);
+        return info;
+      }
+      // NOTE: S3 doesn't have a bucket modification time.  Only a creation
+      // time is available, and you have to list all buckets to get it.
+      info.set_type(FileType::Directory);
+      return info;
+    } else {
+      // It's an object
+      S3Model::HeadObjectRequest req;
+      req.SetBucket(ToAwsString(path.bucket));
+      req.SetKey(ToAwsString(path.key));
+
+      auto outcome = client_lock.Move()->HeadObject(req);
+      if (outcome.IsSuccess()) {
+        // "File" object found
+        FileObjectToInfo(path.key, outcome.GetResult(), &info);
+        return info;
+      }
+      // impl_->GetOrSetBackend(outcome.GetError());  // FIXME
+      if (!IsNotFound(outcome.GetError())) {
+        const auto msg = "When getting information for key '" + path.key +
+                         "' in bucket '" + path.bucket + "': ";
+        return ErrorToStatus(msg, "HeadObject", outcome.GetError(), options().region);
+      }
+      // Not found => perhaps it's an empty "directory"
+      ARROW_ASSIGN_OR_RAISE(bool is_dir, IsEmptyDirectory(path, &outcome));
+      if (is_dir) {
+        info.set_type(FileType::Directory);
+        return info;
+      }
+      // Not found => perhaps it's a non-empty "directory"
+      ARROW_ASSIGN_OR_RAISE(is_dir, IsNonEmptyDirectory(path));
+      if (is_dir) {
+        info.set_type(FileType::Directory);
+      } else {
+        info.set_type(FileType::NotFound);
+      }
+      return info;
+    }
+  }
+
   // On Minio, an empty "directory" doesn't satisfy the same API requests as
   // a non-empty "directory".  This is a Minio-specific quirk, but we need
   // to handle it for unit testing.
@@ -2399,7 +2600,7 @@ class S3FileSystem::Impl : public std::enable_shared_from_this<S3FileSystem::Imp
   // can pass the given outcome to spare a spurious HEAD call.
   Result<bool> IsEmptyDirectory(
       const std::string& bucket, const std::string& key,
-      const S3Model::HeadObjectOutcome* previous_outcome = nullptr) {
+      const S3Model::HeadObjectOutcome* previous_outcome = nullptr) override {
     ARROW_ASSIGN_OR_RAISE(auto client_lock, holder_->Lock());
 
     if (previous_outcome) {
@@ -2441,11 +2642,12 @@ class S3FileSystem::Impl : public std::enable_shared_from_this<S3FileSystem::Imp
   }
 
   Result<bool> IsEmptyDirectory(
-      const S3Path& path, const S3Model::HeadObjectOutcome* previous_outcome = nullptr) {
+      const S3Path& path,
+      const S3Model::HeadObjectOutcome* previous_outcome = nullptr) override {
     return IsEmptyDirectory(path.bucket, path.key, previous_outcome);
   }
 
-  Result<bool> IsNonEmptyDirectory(const S3Path& path) {
+  Result<bool> IsNonEmptyDirectory(const S3Path& path) override {
     ARROW_ASSIGN_OR_RAISE(auto client_lock, holder_->Lock());
 
     S3Model::ListObjectsV2Request req;
@@ -2838,7 +3040,7 @@ class S3FileSystem::Impl : public std::enable_shared_from_this<S3FileSystem::Imp
       // There is no way for a bucket to be a file
       return Future<bool>::MakeFinished(true);
     }
-    auto self = shared_from_this();
+    auto self = std::dynamic_pointer_cast<Impl<UseCrt>>(shared_from_this());
     return DeferNotOk(
         SubmitIO(io_context_, [self, bucket, key]() mutable -> Result<bool> {
           S3Model::HeadObjectRequest req;
@@ -2867,7 +3069,7 @@ class S3FileSystem::Impl : public std::enable_shared_from_this<S3FileSystem::Imp
   // finalized.  We do this by wrapping all the tasks in a scheduler which keeps the
   // resources alive
   Future<> RunInScheduler(
-      std::function<Status(util::AsyncTaskScheduler*, S3FileSystem::Impl*)> callable) {
+      std::function<Status(util::AsyncTaskScheduler*, Impl*)> callable) {
     auto self = shared_from_this();
     FnOnce<Status(util::AsyncTaskScheduler*)> initial_task =
         [callable = std::move(callable),
@@ -2885,51 +3087,52 @@ class S3FileSystem::Impl : public std::enable_shared_from_this<S3FileSystem::Imp
     return scheduler_fut.Then([self]() { return Status::OK(); });
   }
 
-  Future<> DoDeleteDirContentsAsync(const std::string& bucket, const std::string& key) {
-    return RunInScheduler(
-        [bucket, key](util::AsyncTaskScheduler* scheduler, S3FileSystem::Impl* self) {
-          scheduler->AddSimpleTask(
-              [=] {
-                FileSelector select;
-                select.base_dir = bucket + kSep + key;
-                select.recursive = true;
-                select.allow_not_found = false;
+  Future<> DoDeleteDirContentsAsync(const std::string& bucket,
+                                    const std::string& key) override {
+    return RunInScheduler([bucket, key](util::AsyncTaskScheduler* scheduler, Impl* self) {
+      scheduler->AddSimpleTask(
+          [=] {
+            FileSelector select;
+            select.base_dir = bucket + kSep + key;
+            select.recursive = true;
+            select.allow_not_found = false;
 
-                FileInfoGenerator file_infos = self->GetFileInfoGenerator(select);
+            FileInfoGenerator file_infos = self->GetFileInfoGenerator(select);
 
-                auto handle_file_infos = [=](const std::vector<FileInfo>& file_infos) {
-                  std::vector<std::string> file_paths;
-                  for (const auto& file_info : file_infos) {
-                    DCHECK_GT(file_info.path().size(), bucket.size());
-                    auto file_path = file_info.path().substr(bucket.size() + 1);
-                    if (file_info.IsDirectory()) {
-                      // The selector returns FileInfo objects for directories with a
-                      // a path that never ends in a trailing slash, but for AWS the file
-                      // needs to have a trailing slash to recognize it as directory
-                      // (https://github.com/apache/arrow/issues/38618)
-                      DCHECK_OK(internal::AssertNoTrailingSlash(file_path));
-                      file_path = file_path + kSep;
-                    }
-                    file_paths.push_back(std::move(file_path));
-                  }
-                  scheduler->AddSimpleTask(
-                      [=, file_paths = std::move(file_paths)] {
-                        return self->DeleteObjectsAsync(bucket, file_paths);
-                      },
-                      std::string_view("DeleteDirContentsDeleteTask"));
-                  return Status::OK();
-                };
+            auto handle_file_infos = [=](const std::vector<FileInfo>& file_infos) {
+              std::vector<std::string> file_paths;
+              for (const auto& file_info : file_infos) {
+                DCHECK_GT(file_info.path().size(), bucket.size());
+                auto file_path = file_info.path().substr(bucket.size() + 1);
+                if (file_info.IsDirectory()) {
+                  // The selector returns FileInfo objects for directories with a
+                  // a path that never ends in a trailing slash, but for AWS the file
+                  // needs to have a trailing slash to recognize it as directory
+                  // (https://github.com/apache/arrow/issues/38618)
+                  DCHECK_OK(internal::AssertNoTrailingSlash(file_path));
+                  file_path = file_path + kSep;
+                }
+                file_paths.push_back(std::move(file_path));
+              }
+              scheduler->AddSimpleTask(
+                  [=, file_paths = std::move(file_paths)] {
+                    return self->DeleteObjectsAsync(bucket, file_paths);
+                  },
+                  std::string_view("DeleteDirContentsDeleteTask"));
+              return Status::OK();
+            };
 
-                return VisitAsyncGenerator(
-                    AsyncGenerator<std::vector<FileInfo>>(std::move(file_infos)),
-                    std::move(handle_file_infos));
-              },
-              std::string_view("ListFilesForDelete"));
-          return Status::OK();
-        });
+            return VisitAsyncGenerator(
+                AsyncGenerator<std::vector<FileInfo>>(std::move(file_infos)),
+                std::move(handle_file_infos));
+          },
+          std::string_view("ListFilesForDelete"));
+      return Status::OK();
+    });
   }
 
-  Future<> DeleteDirContentsAsync(const std::string& bucket, const std::string& key) {
+  Future<> DeleteDirContentsAsync(const std::string& bucket,
+                                  const std::string& key) override {
     auto self = shared_from_this();
     return EnsureIsDirAsync(bucket, key)
         .Then([self, bucket, key](bool is_dir) -> Future<> {
@@ -2941,7 +3144,7 @@ class S3FileSystem::Impl : public std::enable_shared_from_this<S3FileSystem::Imp
         });
   }
 
-  FileInfoGenerator GetFileInfoGenerator(const FileSelector& select) {
+  FileInfoGenerator GetFileInfoGenerator(const FileSelector& select) override {
     auto maybe_base_path = S3Path::FromString(select.base_dir);
     if (!maybe_base_path.ok()) {
       return MakeFailingGenerator<FileInfoVector>(maybe_base_path.status());
@@ -2949,9 +3152,9 @@ class S3FileSystem::Impl : public std::enable_shared_from_this<S3FileSystem::Imp
     auto base_path = *std::move(maybe_base_path);
 
     PushGenerator<std::vector<FileInfo>> generator;
-    Future<> scheduler_fut = RunInScheduler(
-        [select, base_path, sink = generator.producer()](
-            util::AsyncTaskScheduler* scheduler, S3FileSystem::Impl* self) {
+    Future<> scheduler_fut =
+        RunInScheduler([select, base_path, sink = generator.producer()](
+                           util::AsyncTaskScheduler* scheduler, Impl* self) {
           if (base_path.empty()) {
             bool should_recurse = select.recursive && select.max_recursion > 0;
             self->FullListAsync(/*include_implicit_dirs=*/true, scheduler, sink,
@@ -2974,22 +3177,22 @@ class S3FileSystem::Impl : public std::enable_shared_from_this<S3FileSystem::Imp
     return generator;
   }
 
-  Status EnsureDirectoryExists(const S3Path& path) {
+  Status EnsureDirectoryExists(const S3Path& path) override {
     if (!path.key.empty()) {
       return CreateEmptyDir(path.bucket, path.key);
     }
     return Status::OK();
   }
 
-  Status EnsureParentExists(const S3Path& path) {
+  Status EnsureParentExists(const S3Path& path) override {
     if (path.has_parent()) {
       return EnsureDirectoryExists(path.parent());
     }
     return Status::OK();
   }
 
-  static Result<std::vector<std::string>> ProcessListBuckets(
-      const Aws::S3::Model::ListBucketsOutcome& outcome) {
+  Result<std::vector<std::string>> ProcessListBuckets(
+      const Aws::S3::Model::ListBucketsOutcome& outcome) override {
     if (!outcome.IsSuccess()) {
       return ErrorToStatus(std::forward_as_tuple("When listing buckets: "), "ListBuckets",
                            outcome.GetError());
@@ -3009,15 +3212,16 @@ class S3FileSystem::Impl : public std::enable_shared_from_this<S3FileSystem::Imp
 
   Future<std::vector<std::string>> ListBucketsAsync() {
     auto deferred =
-        [self = shared_from_this()]() mutable -> Result<std::vector<std::string>> {
+        [self = std::dynamic_pointer_cast<Impl<UseCrt>>(
+             shared_from_this())]() mutable -> Result<std::vector<std::string>> {
       ARROW_ASSIGN_OR_RAISE(auto client_lock, self->holder_->Lock());
       return self->ProcessListBuckets(client_lock.Move()->ListBuckets());
     };
     return DeferNotOk(SubmitIO(io_context_, std::move(deferred)));
   }
 
-  Result<std::shared_ptr<ObjectInputFile>> OpenInputFile(const std::string& s,
-                                                         S3FileSystem* fs) {
+  Result<std::shared_ptr<::arrow::io::RandomAccessFile>> OpenInputFile(
+      const std::string& s, S3FileSystem* fs) override {
     ARROW_RETURN_NOT_OK(internal::AssertNoTrailingSlash(s));
     ARROW_ASSIGN_OR_RAISE(auto path, S3Path::FromString(s));
     RETURN_NOT_OK(ValidateFilePath(path));
@@ -3030,8 +3234,8 @@ class S3FileSystem::Impl : public std::enable_shared_from_this<S3FileSystem::Imp
     return ptr;
   }
 
-  Result<std::shared_ptr<ObjectInputFile>> OpenInputFile(const FileInfo& info,
-                                                         S3FileSystem* fs) {
+  Result<std::shared_ptr<::arrow::io::RandomAccessFile>> OpenInputFile(
+      const FileInfo& info, S3FileSystem* fs) override {
     ARROW_RETURN_NOT_OK(internal::AssertNoTrailingSlash(info.path()));
     if (info.type() == FileType::NotFound) {
       return ::arrow::fs::internal::PathNotFound(info.path());
@@ -3050,10 +3254,26 @@ class S3FileSystem::Impl : public std::enable_shared_from_this<S3FileSystem::Imp
     RETURN_NOT_OK(ptr->Init());
     return ptr;
   }
+
+  Result<std::shared_ptr<io::OutputStream>> OpenOutputStream(
+      const std::string& s, const std::shared_ptr<const KeyValueMetadata>& metadata,
+      const io::IOContext& io_context) override {
+    ARROW_RETURN_NOT_OK(internal::AssertNoTrailingSlash(s));
+    ARROW_ASSIGN_OR_RAISE(auto path, S3Path::FromString(s));
+    RETURN_NOT_OK(ValidateFilePath(path));
+
+    RETURN_NOT_OK(CheckS3Initialized());
+
+    auto ptr = std::make_shared<ObjectOutputStream>(holder_, io_context, path, options(),
+                                                    metadata);
+    RETURN_NOT_OK(ptr->Init());
+    return ptr;
+  }
 };
 
 S3FileSystem::S3FileSystem(const S3Options& options, const io::IOContext& io_context)
-    : FileSystem(io_context), impl_(std::make_shared<Impl>(options, io_context)) {
+    : FileSystem(io_context),
+      impl_(std::make_shared<Impl<true>>(options, io_context)) {  // FIXME
   default_async_is_sync_ = false;
 }
 
@@ -3089,70 +3309,7 @@ S3Options S3FileSystem::options() const { return impl_->options(); }
 std::string S3FileSystem::region() const { return impl_->region(); }
 
 Result<FileInfo> S3FileSystem::GetFileInfo(const std::string& s) {
-  ARROW_ASSIGN_OR_RAISE(auto client_lock, impl_->holder_->Lock());
-
-  ARROW_ASSIGN_OR_RAISE(auto path, S3Path::FromString(s));
-  FileInfo info;
-  info.set_path(s);
-
-  if (path.empty()) {
-    // It's the root path ""
-    info.set_type(FileType::Directory);
-    return info;
-  } else if (path.key.empty()) {
-    // It's a bucket
-    S3Model::HeadBucketRequest req;
-    req.SetBucket(ToAwsString(path.bucket));
-
-    auto outcome = client_lock.Move()->HeadBucket(req);
-    if (!outcome.IsSuccess()) {
-      impl_->GetOrSetBackend(outcome.GetError());
-      if (!IsNotFound(outcome.GetError())) {
-        const auto msg = "When getting information for bucket '" + path.bucket + "': ";
-        return ErrorToStatus(msg, "HeadBucket", outcome.GetError(),
-                             impl_->options().region);
-      }
-      info.set_type(FileType::NotFound);
-      return info;
-    }
-    // NOTE: S3 doesn't have a bucket modification time.  Only a creation
-    // time is available, and you have to list all buckets to get it.
-    info.set_type(FileType::Directory);
-    return info;
-  } else {
-    // It's an object
-    S3Model::HeadObjectRequest req;
-    req.SetBucket(ToAwsString(path.bucket));
-    req.SetKey(ToAwsString(path.key));
-
-    auto outcome = client_lock.Move()->HeadObject(req);
-    if (outcome.IsSuccess()) {
-      // "File" object found
-      FileObjectToInfo(path.key, outcome.GetResult(), &info);
-      return info;
-    }
-    impl_->GetOrSetBackend(outcome.GetError());
-    if (!IsNotFound(outcome.GetError())) {
-      const auto msg = "When getting information for key '" + path.key + "' in bucket '" +
-                       path.bucket + "': ";
-      return ErrorToStatus(msg, "HeadObject", outcome.GetError(),
-                           impl_->options().region);
-    }
-    // Not found => perhaps it's an empty "directory"
-    ARROW_ASSIGN_OR_RAISE(bool is_dir, impl_->IsEmptyDirectory(path, &outcome));
-    if (is_dir) {
-      info.set_type(FileType::Directory);
-      return info;
-    }
-    // Not found => perhaps it's a non-empty "directory"
-    ARROW_ASSIGN_OR_RAISE(is_dir, impl_->IsNonEmptyDirectory(path));
-    if (is_dir) {
-      info.set_type(FileType::Directory);
-    } else {
-      info.set_type(FileType::NotFound);
-    }
-    return info;
-  }
+  return impl_->GetFileInfo(s);
 }
 
 Result<FileInfoVector> S3FileSystem::GetFileInfo(const FileSelector& select) {
@@ -3259,30 +3416,7 @@ Status S3FileSystem::CreateDir(const std::string& s, bool recursive) {
   return impl_->CreateEmptyDir(path.bucket, path.key);
 }
 
-Status S3FileSystem::DeleteDir(const std::string& s) {
-  ARROW_ASSIGN_OR_RAISE(auto path, S3Path::FromString(s));
-  if (path.empty()) {
-    return Status::NotImplemented("Cannot delete all S3 buckets");
-  }
-  RETURN_NOT_OK(impl_->DeleteDirContentsAsync(path.bucket, path.key).status());
-  if (path.key.empty() && options().allow_bucket_deletion) {
-    // Delete bucket
-    ARROW_ASSIGN_OR_RAISE(auto client_lock, impl_->holder_->Lock());
-    S3Model::DeleteBucketRequest req;
-    req.SetBucket(ToAwsString(path.bucket));
-    return OutcomeToStatus(
-        std::forward_as_tuple("When deleting bucket '", path.bucket, "': "),
-        "DeleteBucket", client_lock.Move()->DeleteBucket(req));
-  } else if (path.key.empty()) {
-    return Status::IOError("Would delete bucket '", path.bucket, "'. ",
-                           "To delete buckets, enable the allow_bucket_deletion option.");
-  } else {
-    // Delete "directory"
-    RETURN_NOT_OK(impl_->DeleteObject(path.bucket, path.key + kSep));
-    // Parent may be implicitly deleted if it became empty, recreate it
-    return impl_->EnsureParentExists(path);
-  }
-}
+Status S3FileSystem::DeleteDir(const std::string& s) { return impl_->DeleteDir(s); }
 
 Status S3FileSystem::DeleteDirContents(const std::string& s, bool missing_dir_ok) {
   return DeleteDirContentsAsync(s, missing_dir_ok).status();
@@ -3313,33 +3447,7 @@ Status S3FileSystem::DeleteRootDirContents() {
   return Status::NotImplemented("Cannot delete all S3 buckets");
 }
 
-Status S3FileSystem::DeleteFile(const std::string& s) {
-  ARROW_ASSIGN_OR_RAISE(auto client_lock, impl_->holder_->Lock());
-
-  ARROW_ASSIGN_OR_RAISE(auto path, S3Path::FromString(s));
-  RETURN_NOT_OK(ValidateFilePath(path));
-
-  // Check the object exists
-  S3Model::HeadObjectRequest req;
-  req.SetBucket(ToAwsString(path.bucket));
-  req.SetKey(ToAwsString(path.key));
-
-  auto outcome = client_lock.Move()->HeadObject(req);
-  if (!outcome.IsSuccess()) {
-    if (IsNotFound(outcome.GetError())) {
-      return PathNotFound(path);
-    } else {
-      return ErrorToStatus(
-          std::forward_as_tuple("When getting information for key '", path.key,
-                                "' in bucket '", path.bucket, "': "),
-          "HeadObject", outcome.GetError());
-    }
-  }
-  // Object found, delete it
-  RETURN_NOT_OK(impl_->DeleteObject(path.bucket, path.key));
-  // Parent may be implicitly deleted if it became empty, recreate it
-  return impl_->EnsureParentExists(path);
-}
+Status S3FileSystem::DeleteFile(const std::string& s) { return impl_->DeleteFile(s); }
 
 Status S3FileSystem::Move(const std::string& src, const std::string& dest) {
   // XXX We don't implement moving directories as it would be too expensive:
@@ -3394,16 +3502,7 @@ Result<std::shared_ptr<io::RandomAccessFile>> S3FileSystem::OpenInputFile(
 
 Result<std::shared_ptr<io::OutputStream>> S3FileSystem::OpenOutputStream(
     const std::string& s, const std::shared_ptr<const KeyValueMetadata>& metadata) {
-  ARROW_RETURN_NOT_OK(internal::AssertNoTrailingSlash(s));
-  ARROW_ASSIGN_OR_RAISE(auto path, S3Path::FromString(s));
-  RETURN_NOT_OK(ValidateFilePath(path));
-
-  RETURN_NOT_OK(CheckS3Initialized());
-
-  auto ptr = std::make_shared<ObjectOutputStream>(impl_->holder_, io_context(), path,
-                                                  impl_->options(), metadata);
-  RETURN_NOT_OK(ptr->Init());
-  return ptr;
+  return impl_->OpenOutputStream(s, metadata, io_context());
 }
 
 Result<std::shared_ptr<io::OutputStream>> S3FileSystem::OpenAppendStream(

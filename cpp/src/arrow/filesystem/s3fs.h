@@ -40,6 +40,12 @@ class STSClient;
 namespace arrow {
 namespace fs {
 
+namespace internal {
+
+class S3FileSystemImplBase;
+
+}  // namespace internal
+
 /// Options for using a proxy for S3
 struct ARROW_EXPORT S3ProxyOptions {
   std::string scheme;
@@ -382,8 +388,7 @@ class ARROW_EXPORT S3FileSystem : public FileSystem {
  protected:
   explicit S3FileSystem(const S3Options& options, const io::IOContext&);
 
-  class Impl;
-  std::shared_ptr<Impl> impl_;
+  std::shared_ptr<internal::S3FileSystemImplBase> impl_;
 };
 
 enum class S3LogLevel : int8_t { Off, Fatal, Error, Warn, Info, Debug, Trace };
