@@ -35,6 +35,7 @@
 #  include "arrow/filesystem/hdfs.h"
 #endif
 #ifdef ARROW_S3
+#  include "arrow/filesystem/s3crtfs.h"
 #  include "arrow/filesystem/s3fs.h"
 #endif
 #include "arrow/filesystem/localfs.h"
@@ -922,7 +923,13 @@ Result<std::shared_ptr<FileSystem>> FileSystemFromUriReal(const Uri& uri,
 #ifdef ARROW_S3
     RETURN_NOT_OK(EnsureS3Initialized());
     ARROW_ASSIGN_OR_RAISE(auto options, S3Options::FromUri(uri, out_path));
-    ARROW_ASSIGN_OR_RAISE(auto s3fs, S3FileSystem::Make(options, io_context));
+    auto use_crt = arrow::internal::GetEnvVar("ARROW_USE_S3_CRT").ValueOr("");
+    std::shared_ptr<FileSystem> s3fs;
+    if (!use_crt.empty() && use_crt != "0") {
+      ARROW_ASSIGN_OR_RAISE(s3fs, S3CrtFileSystem::Make(options, io_context));
+    } else {
+      ARROW_ASSIGN_OR_RAISE(s3fs, S3FileSystem::Make(options, io_context));
+    }
     return s3fs;
 #else
     return Status::NotImplemented(

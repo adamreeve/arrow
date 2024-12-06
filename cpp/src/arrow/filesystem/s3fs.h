@@ -227,6 +227,10 @@ struct ARROW_EXPORT S3Options {
   /// This option applies if the scheme is "https".
   bool tls_verify_certificates = true;
 
+  /// Names of network interfaces to use.
+  /// Only valid when using the CRT S3 client.
+  std::vector<std::string> network_interface_names;
+
   S3Options();
 
   /// Configure with the default AWS credentials provider chain.
