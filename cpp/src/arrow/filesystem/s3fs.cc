@@ -413,6 +413,8 @@ Result<S3Options> S3Options::FromUri(const Uri& uri, std::string* out_path) {
     } else if (kv.first == "tls_verify_certificates") {
       ARROW_ASSIGN_OR_RAISE(options.tls_verify_certificates,
                             ::arrow::internal::ParseBoolean(kv.second));
+    } else if (kv.first == "network_interface_names") {
+      options.network_interface_names = internal::SplitAbstractPath(kv.second, ',');
     } else {
       return Status::Invalid("Unexpected query parameter in S3 URI: '", kv.first, "'");
     }
@@ -1111,6 +1113,10 @@ class ClientBuilder {
 
   Result<std::shared_ptr<S3ClientHolder>> BuildClient(
       std::optional<io::IOContext> io_context = std::nullopt) {
+    if (!options_.network_interface_names.empty()) {
+      return Status::Invalid(
+          "Cannot specify network interface names for standard S3 client");
+    }
     credentials_provider_ = options_.credentials_provider;
     if (!options_.region.empty()) {
       client_config_.region = ToAwsString(options_.region);

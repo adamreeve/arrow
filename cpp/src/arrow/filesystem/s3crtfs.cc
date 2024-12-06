@@ -831,6 +831,11 @@ class ClientBuilder {
       client_config_.maxConnections = std::max(io_context->executor()->GetCapacity(), 25);
     }
 
+    client_config_.networkInterfaceNames.clear();
+    for (const auto& name : options_.network_interface_names) {
+      client_config_.networkInterfaceNames.push_back(ToAwsString(name));
+    }
+
     const bool use_virtual_addressing =
         options_.endpoint_override.empty() || options_.force_virtual_addressing;
 
