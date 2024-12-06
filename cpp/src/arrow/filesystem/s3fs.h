@@ -383,11 +383,13 @@ class ARROW_EXPORT S3FileSystem : public FileSystem {
   static Result<std::shared_ptr<S3FileSystem>> Make(
       const S3Options& options, const io::IOContext& = io::default_io_context());
 
+  // TODO: How to make this non-public?
+  class ImplBase;
+
  protected:
   explicit S3FileSystem(const S3Options& options, const io::IOContext&);
 
-  class Impl;
-  std::shared_ptr<Impl> impl_;
+  std::shared_ptr<ImplBase> impl_;
 };
 
 enum class S3LogLevel : int8_t { Off, Fatal, Error, Warn, Info, Debug, Trace };
