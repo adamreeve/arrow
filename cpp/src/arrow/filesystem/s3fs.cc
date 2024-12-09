@@ -16,6 +16,7 @@
 // under the License.
 
 #include "arrow/filesystem/s3fs.h"
+#include "arrow/filesystem/s3crtfs.h"
 
 #include <algorithm>
 #include <atomic>
@@ -3469,9 +3470,11 @@ struct AwsInstance {
         auto* leaked_shared_ptr =
             new std::shared_ptr<S3ClientFinalizer>(GetClientFinalizer());
         ARROW_UNUSED(leaked_shared_ptr);
+        LeakS3CrtClients();
         return;
       }
       GetClientFinalizer()->Finalize();
+      FinalizeS3Crt();
 #ifdef ARROW_S3_HAS_S3CLIENT_CONFIGURATION
       EndpointProviderCache::Instance()->Reset();
 #endif

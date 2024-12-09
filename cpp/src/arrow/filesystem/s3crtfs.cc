@@ -1795,6 +1795,16 @@ void FileObjectToInfo(const S3CrtModel::Object& obj, FileInfo* info) {
 
 }  // namespace
 
+void FinalizeS3Crt() {
+  GetClientFinalizer()->Finalize();
+  EndpointProviderCache::Instance()->Reset();
+}
+
+void LeakS3CrtClients() {
+  auto* leaked_shared_ptr = new std::shared_ptr<S3ClientFinalizer>(GetClientFinalizer());
+  ARROW_UNUSED(leaked_shared_ptr);
+}
+
 // -----------------------------------------------------------------------
 // S3 filesystem implementation
 
