@@ -273,7 +273,9 @@ cdef class S3FileSystem(FileSystem):
     """
 
     cdef:
+        c_bool _use_crt
         CS3FileSystem* s3fs
+        CS3CrtFileSystem* s3crtfs
 
     def __init__(self, *, access_key=None, secret_key=None, session_token=None,
                  bint anonymous=False, region=None, request_timeout=None,
@@ -285,11 +287,15 @@ cdef class S3FileSystem(FileSystem):
                  check_directory_existence_before_creation=False,
                  retry_strategy: S3RetryStrategy = AwsStandardS3RetryStrategy(
                      max_attempts=3),
-                 force_virtual_addressing=False):
+                 force_virtual_addressing=False,
+                 use_crt=False,
+                 network_interface_names=None):
         cdef:
             optional[CS3Options] options
             shared_ptr[CS3FileSystem] wrapped
+            shared_ptr[CS3CrtFileSystem] wrapped_crt
 
+        self._use_crt = bool(use_crt)
         # Need to do this before initializing `options` as the S3Options
         # constructor has a debug check against use after S3 finalization.
         ensure_s3_initialized()
@@ -371,6 +377,8 @@ cdef class S3FileSystem(FileSystem):
                 default_metadata = KeyValueMetadata(default_metadata)
             options.value().default_metadata = pyarrow_unwrap_metadata(
                 default_metadata)
+        if network_interface_names is not None:
+            options.value().network_interface_names = [tobytes(nin) for nin in network_interface_names]
 
         if proxy_options is not None:
             if isinstance(proxy_options, dict):
@@ -409,14 +417,23 @@ cdef class S3FileSystem(FileSystem):
         else:
             raise ValueError(f'Invalid retry_strategy {retry_strategy!r}')
 
-        with nogil:
-            wrapped = GetResultValue(CS3FileSystem.Make(options.value()))
-
-        self.init(<shared_ptr[CFileSystem]> wrapped)
+        if self._use_crt:
+            with nogil:
+                wrapped_crt = GetResultValue(CS3CrtFileSystem.Make(options.value()))
+            self.init(<shared_ptr[CFileSystem]> wrapped_crt)
+        else:
+            with nogil:
+                wrapped = GetResultValue(CS3FileSystem.Make(options.value()))
+            self.init(<shared_ptr[CFileSystem]> wrapped)
 
     cdef init(self, const shared_ptr[CFileSystem]& wrapped):
         FileSystem.init(self, wrapped)
-        self.s3fs = <CS3FileSystem*> wrapped.get()
+        typ = frombytes(wrapped.get().type_name())
+        self._use_crt = typ == "s3crt"
+        if self._use_crt:
+            self.s3crtfs = <CS3CrtFileSystem *> wrapped.get()
+        else:
+            self.s3fs = <CS3FileSystem*> wrapped.get()
 
     @staticmethod
     @binding(True)  # Required for cython < 3
@@ -426,7 +443,7 @@ cdef class S3FileSystem(FileSystem):
         return S3FileSystem(**kwargs)
 
     def __reduce__(self):
-        cdef CS3Options opts = self.s3fs.options()
+        cdef CS3Options opts = self.s3crtfs.options() if self._use_crt else self.s3fs.options()
 
         # if creds were explicitly provided, then use them
         # else obtain them as they were last time.
@@ -468,6 +485,7 @@ cdef class S3FileSystem(FileSystem):
                                'password': frombytes(
                                    opts.proxy_options.password)},
                 force_virtual_addressing=opts.force_virtual_addressing,
+                use_crt=self._use_crt,
             ),)
         )
 
@@ -476,4 +494,4 @@ cdef class S3FileSystem(FileSystem):
         """
         The AWS region this filesystem connects to.
         """
-        return frombytes(self.s3fs.region())
+        return frombytes(self.s3crtfs.region() if self._use_crt else self.s3fs.region())
