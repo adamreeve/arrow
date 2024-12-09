@@ -167,6 +167,7 @@ cdef extern from "arrow/filesystem/api.h" namespace "arrow::fs" nogil:
         CS3ProxyOptions proxy_options
         CS3CredentialsKind credentials_kind
         shared_ptr[CS3RetryStrategy] retry_strategy
+        vector[c_string] network_interface_names
         void ConfigureDefaultCredentials()
         void ConfigureAccessKey(const c_string& access_key,
                                 const c_string& secret_key,
@@ -196,6 +197,12 @@ cdef extern from "arrow/filesystem/api.h" namespace "arrow::fs" nogil:
     cdef cppclass CS3FileSystem "arrow::fs::S3FileSystem"(CFileSystem):
         @staticmethod
         CResult[shared_ptr[CS3FileSystem]] Make(const CS3Options& options)
+        CS3Options options()
+        c_string region()
+
+    cdef cppclass CS3CrtFileSystem "arrow::fs::S3CrtFileSystem"(CFileSystem):
+        @staticmethod
+        CResult[shared_ptr[CS3CrtFileSystem]] Make(const CS3Options& options)
         CS3Options options()
         c_string region()
 

@@ -30,5 +30,6 @@
 #include "arrow/filesystem/localfs.h"  // IWYU pragma: export
 #include "arrow/filesystem/mockfs.h"   // IWYU pragma: export
 #ifdef ARROW_S3
-#  include "arrow/filesystem/s3fs.h"  // IWYU pragma: export
+#  include "arrow/filesystem/s3crtfs.h"  // IWYU pragma: export
+#  include "arrow/filesystem/s3fs.h"     // IWYU pragma: export
 #endif
