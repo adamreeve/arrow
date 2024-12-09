@@ -137,5 +137,9 @@ class ARROW_EXPORT S3CrtFileSystem : public FileSystem {
   std::shared_ptr<Impl> impl_;
 };
 
+void FinalizeS3Crt();
+
+void LeakS3CrtClients();
+
 }  // namespace fs
 }  // namespace arrow
