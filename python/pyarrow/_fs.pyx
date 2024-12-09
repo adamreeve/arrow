@@ -491,7 +491,7 @@ cdef class FileSystem(_Weakrefable):
             self = _MockFileSystem.__new__(_MockFileSystem)
         elif typ == 'subtree':
             self = SubTreeFileSystem.__new__(SubTreeFileSystem)
-        elif typ == 's3':
+        elif typ in ['s3', 's3crt']:
             from pyarrow._s3fs import S3FileSystem
             self = S3FileSystem.__new__(S3FileSystem)
         elif typ == 'gcs':
