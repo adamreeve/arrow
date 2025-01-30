@@ -79,8 +79,6 @@
 #include <aws/s3/model/PutObjectResult.h>
 #include <aws/s3/model/UploadPartRequest.h>
 
-#include <aws/s3-crt/S3CrtClient.h>
-
 // AWS_SDK_VERSION_{MAJOR,MINOR,PATCH} are available since 1.9.7.
 #if defined(AWS_SDK_VERSION_MAJOR) && defined(AWS_SDK_VERSION_MINOR) && \
     defined(AWS_SDK_VERSION_PATCH)
