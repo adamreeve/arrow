@@ -388,5 +388,101 @@ TEST_P(LargeRowCountEncryptionTest, ReadEncryptLargeRowCount) {
 INSTANTIATE_TEST_SUITE_P(LargeRowCountEncryptionTest, LargeRowCountEncryptionTest,
                          kAllParamValues, PrintParam);
 
+TEST(EncryptionTest, WriteAndReadWithExplicitEncryptionKeys) {
+  std::shared_ptr<fs::FileSystem> file_system;
+  EXPECT_OK_AND_ASSIGN(file_system, fs::internal::MockFileSystem::Make(
+                                        std::chrono::system_clock::now(), {}));
+  ASSERT_OK(file_system->CreateDir(std::string(kBaseDir)));
+
+  const char* footer_key = "0123456789012345";
+  const char* col_key_1 = "1234567890123450";
+  const char* col_key_2 = "1234567890123451";
+
+  auto partitioning = std::make_shared<HivePartitioning>(schema({field("part", utf8())}));
+
+  {
+    auto table_schema = schema({field("a", int64()), field("c", int64()),
+                                field("e", int64()), field("part", utf8())});
+    auto table = TableFromJSON(table_schema, {R"([
+                          [ 0, 9, 1, "a" ],
+                          [ 1, 8, 2, "a" ],
+                          [ 2, 7, 1, "c" ],
+                          [ 3, 6, 2, "c" ],
+                          [ 4, 5, 1, "e" ],
+                          [ 5, 4, 2, "e" ],
+                          [ 6, 3, 1, "g" ],
+                          [ 7, 2, 2, "g" ],
+                          [ 8, 1, 1, "i" ],
+                          [ 9, 0, 2, "i" ]
+                        ])"});
+
+    parquet::ColumnPathToEncryptionPropertiesMap encrypted_columns;
+    encrypted_columns["a"] =
+        parquet::ColumnEncryptionProperties::Builder("a").key(col_key_1)->build();
+    encrypted_columns["c"] =
+        parquet::ColumnEncryptionProperties::Builder("c").key(col_key_2)->build();
+    auto encryption_properties = parquet::FileEncryptionProperties::Builder(footer_key)
+                                     .encrypted_columns(encrypted_columns)
+                                     ->build();
+    auto writer_properties =
+        parquet::WriterProperties::Builder().encryption(encryption_properties)->build();
+    auto file_format = std::make_shared<ParquetFileFormat>();
+    auto parquet_file_write_options =
+        checked_pointer_cast<ParquetFileWriteOptions>(file_format->DefaultWriteOptions());
+    parquet_file_write_options->writer_properties = writer_properties;
+
+    // Write dataset.
+    auto dataset = std::make_shared<InMemoryDataset>(table);
+    EXPECT_OK_AND_ASSIGN(auto scanner_builder, dataset->NewScan());
+    ARROW_EXPECT_OK(scanner_builder->UseThreads(false));
+    EXPECT_OK_AND_ASSIGN(auto scanner, scanner_builder->Finish());
+
+    FileSystemDatasetWriteOptions write_options;
+    write_options.file_write_options = parquet_file_write_options;
+    write_options.filesystem = file_system;
+    write_options.partitioning = partitioning;
+    write_options.base_dir = kBaseDir;
+    write_options.basename_template = "part{i}.parquet";
+    ASSERT_OK(FileSystemDataset::Write(write_options, std::move(scanner)));
+  }
+
+  // Read dataset
+  auto parquet_scan_options = std::make_shared<ParquetFragmentScanOptions>();
+  parquet::ColumnPathToDecryptionPropertiesMap column_decryption;
+  column_decryption["a"] =
+      parquet::ColumnDecryptionProperties::Builder("a").key(col_key_1)->build();
+  column_decryption["c"] =
+      parquet::ColumnDecryptionProperties::Builder("c").key(col_key_2)->build();
+  auto file_decryption_properties = parquet::FileDecryptionProperties::Builder()
+                                        .footer_key(footer_key)
+                                        ->column_keys(column_decryption)
+                                        ->build();
+  parquet_scan_options->reader_properties->file_decryption_properties(
+      file_decryption_properties);
+
+  auto file_format = std::make_shared<ParquetFileFormat>();
+  file_format->default_fragment_scan_options = std::move(parquet_scan_options);
+
+  fs::FileSelector selector;
+  selector.base_dir = kBaseDir;
+  selector.recursive = true;
+
+  FileSystemFactoryOptions factory_options;
+  factory_options.partitioning = partitioning;
+  factory_options.partition_base_dir = kBaseDir;
+  EXPECT_OK_AND_ASSIGN(auto dataset_factory,
+                       FileSystemDatasetFactory::Make(file_system, selector, file_format,
+                                                      factory_options));
+
+  EXPECT_OK_AND_ASSIGN(auto dataset, dataset_factory->Finish());
+
+  EXPECT_OK_AND_ASSIGN(auto scanner_builder, dataset->NewScan());
+  EXPECT_OK_AND_ASSIGN(auto scanner, scanner_builder->Finish());
+  ARROW_EXPECT_OK(scanner_builder->UseThreads(false));
+  EXPECT_OK_AND_ASSIGN(auto scan_result, scanner->ToTable());
+
+  ASSERT_EQ(scan_result->num_rows(), 10);
+}
+
 }  // namespace dataset
 }  // namespace arrow
