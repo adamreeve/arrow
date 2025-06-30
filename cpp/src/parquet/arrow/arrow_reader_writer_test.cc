@@ -905,6 +905,42 @@ TEST(TestStreamFile, ReadFile) {
   std::cout << "Max RSS = " << (maxRss / (double)(1024 * 1024)) << " MB" << std::endl;
 }
 
+TEST(TestStreamFile, ReadFileNoArrow) {
+  const std::string file_path = "/tmp/stream_test.parquet";
+  PARQUET_ASSIGN_OR_THROW(
+    std::shared_ptr<::arrow::io::ReadableFile> input_file, ::arrow::io::ReadableFile::Open(file_path, ::arrow::default_memory_pool()));
+
+  ReaderProperties reader_properties;
+  std::unique_ptr<ParquetFileReader> reader = ParquetFileReader::Open(input_file, reader_properties);
+  int num_row_groups = reader->metadata()->num_row_groups();
+  int num_columns = reader->metadata()->num_columns();
+
+  std::vector<float> buffer;
+  int64_t maxRss = 0;
+  for (int rg_idx = 0; rg_idx < num_row_groups; ++rg_idx) {
+    auto rg_reader = reader->RowGroup(rg_idx);
+    buffer.resize(rg_reader->metadata()->num_rows());
+
+    for (int col_idx = 0; col_idx < num_columns; ++col_idx) {
+      auto col = std::dynamic_pointer_cast<FloatReader>(rg_reader->Column(col_idx));
+      int64_t rows_read = 0;
+      int64_t batch_rows_read = 0;
+      while (rows_read < rg_reader->metadata()->num_rows()) {
+        int64_t rows_to_read = rg_reader->metadata()->num_rows() - rows_read;
+        col->ReadBatch(rows_to_read, nullptr, nullptr, buffer.data(), &batch_rows_read);
+        rows_read += batch_rows_read;
+      }
+    }
+
+    int64_t rss = ::arrow::internal::GetCurrentRSS();
+    std::cout << "Row group " << rg_idx << ", RSS = " << (rss / (double)(1024 * 1024)) << " MB" << std::endl;
+    maxRss = std::max(maxRss, rss);
+  }
+
+  std::cout << "Read " << num_row_groups << " row groups" << std::endl;
+  std::cout << "Max RSS = " << (maxRss / (double)(1024 * 1024)) << " MB" << std::endl;
+}
+
 
 // The Decimal roundtrip tests always go through the FixedLenByteArray path,
 // check the ByteArray case manually.
