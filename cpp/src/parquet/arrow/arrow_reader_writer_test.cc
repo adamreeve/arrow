@@ -61,6 +61,7 @@
 #  include "arrow/csv/api.h"
 #endif
 
+#include "arrow/util/io_util.h"
 #include "parquet/api/reader.h"
 #include "parquet/api/writer.h"
 
@@ -829,6 +830,81 @@ class TestReadDecimals : public ParquetIOTestBase {
     }
   }
 };
+
+TEST(TestStreamFile, WriteFile) {
+  const std::string file_path = "/tmp/stream_test.parquet";
+  constexpr int64_t num_row_groups = 100;
+  constexpr int64_t rows_per_row_group = 1000000;
+  constexpr int64_t num_columns = 10;
+
+  PARQUET_ASSIGN_OR_THROW(
+    const std::shared_ptr<::arrow::io::FileOutputStream> file, ::arrow::io::FileOutputStream::Open(file_path));
+
+  WriterProperties::Builder writer_properties_builder;
+  auto writer_properties = writer_properties_builder.build();
+
+  std::vector<NodePtr> fields;
+  for (auto col_idx = 0; col_idx < num_columns; ++col_idx) {
+    fields.push_back(PrimitiveNode::Make("x" + std::to_string(col_idx), Repetition::REQUIRED, Type::FLOAT));
+  }
+  auto schema = std::dynamic_pointer_cast<schema::GroupNode>(schema::GroupNode::Make(
+      "root", Repetition::REQUIRED, fields));
+  std::unique_ptr<ParquetFileWriter> writer = ParquetFileWriter::Open(file, schema, writer_properties, nullptr);
+
+  std::vector<float> buffer(rows_per_row_group);
+  for (auto row_group_idx = 0; row_group_idx < num_row_groups; ++row_group_idx) {
+    auto row_group = writer->AppendRowGroup();
+    for (auto col_idx = 0; col_idx < num_columns; ++col_idx) {
+      ::arrow::random_real(rows_per_row_group, row_group_idx * num_columns + col_idx, -1.0, 1.0, &buffer);
+      auto column_writer = row_group->NextColumn();
+      auto& float_column_writer = dynamic_cast<FloatWriter&>(*column_writer);
+      float_column_writer.WriteBatch(rows_per_row_group, nullptr, nullptr, buffer.data());
+    }
+    row_group->Close();
+  }
+
+  writer->Close();
+}
+
+TEST(TestStreamFile, ReadFile) {
+  const std::string file_path = "/tmp/stream_test.parquet";
+  PARQUET_ASSIGN_OR_THROW(
+    std::shared_ptr<::arrow::io::ReadableFile> input_file, ::arrow::io::ReadableFile::Open(file_path, ::arrow::default_memory_pool()));
+
+  ReaderProperties reader_properties;
+  ArrowReaderProperties arrow_reader_properties;
+  //arrow_reader_properties.set_pre_buffer(false);
+
+  FileReaderBuilder builder;
+  PARQUET_THROW_NOT_OK(builder.Open(input_file, reader_properties));
+  builder.properties(arrow_reader_properties);
+
+  int batchesRead = 0;
+  int64_t maxRss = 0;
+  {
+    std::unique_ptr<FileReader> reader;
+    PARQUET_THROW_NOT_OK(builder.Build(&reader));
+
+    PARQUET_ASSIGN_OR_THROW(
+      std::shared_ptr<::arrow::RecordBatchReader> batch_reader, reader->GetRecordBatchReader());
+
+    while (true) {
+      std::shared_ptr<::arrow::RecordBatch> batch;
+      PARQUET_THROW_NOT_OK(batch_reader->ReadNext(&batch));
+      if (batch == nullptr) {
+        break;
+      }
+      int64_t rss = ::arrow::internal::GetCurrentRSS();
+      std::cout << "Batch " << batchesRead << ", RSS = " << (rss / (double)(1024 * 1024)) << " MB" << std::endl;
+      maxRss = std::max(maxRss, rss);
+      batchesRead++;
+    }
+  }
+
+  std::cout << "Read " << batchesRead << " batches" << std::endl;
+  std::cout << "Max RSS = " << (maxRss / (double)(1024 * 1024)) << " MB" << std::endl;
+}
+
 
 // The Decimal roundtrip tests always go through the FixedLenByteArray path,
 // check the ByteArray case manually.
