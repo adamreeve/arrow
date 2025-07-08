@@ -1869,6 +1869,54 @@ TEST_F(TestValuesWriterInt32Type, AvoidCompressedInDataPageV2) {
 }
 #endif
 
+TEST(TestColumnWriter, WriteLargeLists) {
+  auto sink = CreateOutputStream();
+  auto schema = std::static_pointer_cast<GroupNode>(GroupNode::Make(
+      "schema", Repetition::REQUIRED,
+      {
+          GroupNode::Make(
+              "x", Repetition::OPTIONAL,
+              {
+                  GroupNode::Make("list", Repetition::REPEATED,
+                                  {
+                                      schema::Float("element", Repetition::REQUIRED),
+                                  },
+                                  nullptr),
+              },
+              LogicalType::List()),
+      }));
+  auto properties = WriterProperties::Builder()
+                        .disable_dictionary()
+                        //->disable_write_page_index()
+                        ->build();
+  auto file_writer = ParquetFileWriter::Open(sink, schema, properties);
+  auto rg_writer = file_writer->AppendRowGroup();
+
+  constexpr int64_t num_rows = 1000 * 1000;
+  constexpr int64_t num_list_elements = 1000;
+
+  std::vector<int16_t> def_levels(num_list_elements);
+  std::vector<int16_t> rep_levels(num_list_elements);
+  std::vector<float> values(num_list_elements);
+
+  for (int32_t i = 0; i < num_list_elements; ++i) {
+    def_levels[i] = 2;
+    rep_levels[i] = i == 0 ? 0 : 1;
+  }
+
+  auto col_writer = dynamic_cast<FloatWriter*>(rg_writer->NextColumn());
+  for (int32_t i = 0; i < num_rows; i++) {
+    random_numbers(num_list_elements, i, -100.0f, 100.0f, values.data());
+    col_writer->WriteBatch(num_list_elements, def_levels.data(), rep_levels.data(),
+                           values.data());
+  }
+  col_writer->Close();
+
+  rg_writer->Close();
+  file_writer->Close();
+  ASSERT_OK_AND_ASSIGN(auto buffer, sink->Finish());
+}
+
 // Test writing and reading geometry columns
 class TestGeometryValuesWriter : public TestPrimitiveWriter<ByteArrayType> {
  public:
