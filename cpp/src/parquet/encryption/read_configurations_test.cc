@@ -324,16 +324,16 @@ TEST(DecryptionTestsAes256, PlaintextFooterWithColumnEnc) {
     ColumnDecryptionProperties::Builder builder_4("int32_field");
     ColumnDecryptionProperties::Builder builder_5("ba_field");
     ColumnDecryptionProperties::Builder builder_6("flba_field");
-    ColumnDecryptionProperties::Builder builder_7("int64_list_field");
-    ColumnDecryptionProperties::Builder builder_8("int64_field");
+    ColumnDecryptionProperties::Builder builder_7("int64_field");
+    ColumnDecryptionProperties::Builder builder_8("int96_field");
     column_keys["double_field"] = builder_1.key(SecureString("12345678901234567890123456789012"))->build();
     column_keys["float_field"] = builder_2.key(SecureString("12345678901234567890123456789013"))->build();
     column_keys["boolean_field"] = builder_3.key(SecureString("12345678901234567890123456789014"))->build();
     column_keys["int32_field"] = builder_4.key(SecureString("12345678901234567890123456789015"))->build();
     column_keys["ba_field"] = builder_5.key(SecureString("12345678901234567890123456789016"))->build();
     column_keys["flba_field"] = builder_6.key(SecureString("12345678901234567890123456789017"))->build();
-    column_keys["int64_list_field"] = builder_7.key(SecureString("12345678901234567890123456789018"))->build();
-    column_keys["int64_field"] = builder_8.key(SecureString("12345678901234567890123456789019"))->build();
+    column_keys["int64_field"] = builder_7.key(SecureString("12345678901234567890123456789018"))->build();
+    column_keys["int96_field"] = builder_8.key(SecureString("12345678901234567890123456789019"))->build();
 
     parquet::FileDecryptionProperties::Builder builder;
     builder.footer_key(footer_key)->column_keys(column_keys);
