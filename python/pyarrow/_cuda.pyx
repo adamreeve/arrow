@@ -80,8 +80,15 @@ cdef class Context(_Weakrefable):
         if context is None:
             import numba.cuda
             context = numba.cuda.current_context()
+        handle = context.handle
+        if hasattr(handle, 'value'):
+            # In numba-cuda < v0.28.0, handle is a ctypes wrapper with value attribute
+            handle = handle.value
+        else:
+            # In numba-cuda >= v0.28.0, handle is a CUcontext object
+            handle = int(handle)
         return Context(device_number=context.device.id,
-                       handle=context.handle.value)
+                       handle=handle)
 
     def to_numba(self):
         """

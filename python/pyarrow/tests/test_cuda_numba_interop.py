@@ -46,12 +46,22 @@ def teardown_module(module):
     del module.context_choices
 
 
+def _nb_ctx_handle(ctx):
+    # A context obtained from to_numba() has a handle with a value attribute,
+    # but a context obtained from numba_cuda >= v 0.28.0 has a handle that
+    # can be converted to int to get the pointer value.
+    handle = ctx.handle
+    if hasattr(handle, "value"):
+        return handle.value
+    return int(handle)
+
+
 @pytest.mark.parametrize("c", range(len(context_choice_ids)),
                          ids=context_choice_ids)
 def test_context(c):
     ctx, nb_ctx = context_choices[c]
-    assert ctx.handle == nb_ctx.handle.value
-    assert ctx.handle == ctx.to_numba().handle.value
+    assert ctx.handle == _nb_ctx_handle(nb_ctx)
+    assert ctx.handle == _nb_ctx_handle(ctx.to_numba())
     ctx2 = cuda.Context.from_numba(nb_ctx)
     assert ctx.handle == ctx2.handle
     size = 10
@@ -203,7 +213,7 @@ def test_numba_context(c, dtype):
     with nb_cuda.gpus[0]:
         arr, cbuf = make_random_buffer(size, target='device',
                                        dtype=dtype, ctx=ctx)
-        assert cbuf.context.handle == nb_ctx.handle.value
+        assert cbuf.context.handle == _nb_ctx_handle(nb_ctx)
         mem = cbuf.to_numba()
         darr = DeviceNDArray(arr.shape, arr.strides, arr.dtype, gpu_data=mem)
         np.testing.assert_equal(darr.copy_to_host(), arr)
