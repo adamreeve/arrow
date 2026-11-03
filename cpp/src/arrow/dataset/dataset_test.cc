@@ -277,6 +277,61 @@ TEST_F(TestUnionDataset, TrivialScan) {
   AssertDatasetEquals(reader.get(), dataset.get());
 }
 
+class TestFilteredDataset : public DatasetFixtureMixin {};
+
+TEST_F(TestFilteredDataset, UnionOfDifferentFilters) {
+  SetSchema({field("i", int32())});
+  auto batch = RecordBatchFromJSON(schema_, R"([[1], [2], [3], [null], [4]])");
+  auto child = std::make_shared<InMemoryDataset>(schema_, RecordBatchVector{batch});
+
+  // Rows where a child's filter is null (i is null) must not leak into the union.
+  ASSERT_OK_AND_ASSIGN(auto small,
+                       FilteredDataset::Make(child, compute::less(compute::field_ref("i"),
+                                                                  compute::literal(2))));
+  ASSERT_OK_AND_ASSIGN(
+      auto large, FilteredDataset::Make(child, compute::greater(compute::field_ref("i"),
+                                                                compute::literal(3))));
+  ASSERT_OK_AND_ASSIGN(auto dataset, UnionDataset::Make(schema_, {small, large}));
+
+  ASSERT_OK_AND_ASSIGN(auto builder, dataset->NewScan());
+  ASSERT_OK_AND_ASSIGN(auto scanner, builder->Finish());
+  ASSERT_OK_AND_ASSIGN(auto table, scanner->ToTable());
+  AssertTablesEqual(*TableFromJSON(schema_, {R"([[1], [4]])"}), *table,
+                    /*same_chunk_layout=*/false);
+  ASSERT_OK_AND_EQ(2, scanner->CountRows());
+
+  // A filter on the union applies on top of each child's filter.
+  ASSERT_OK_AND_ASSIGN(builder, dataset->NewScan());
+  ASSERT_OK(
+      builder->Filter(compute::not_equal(compute::field_ref("i"), compute::literal(1))));
+  ASSERT_OK_AND_ASSIGN(scanner, builder->Finish());
+  ASSERT_OK_AND_ASSIGN(table, scanner->ToTable());
+  AssertTablesEqual(*TableFromJSON(schema_, {R"([[4]])"}), *table,
+                    /*same_chunk_layout=*/false);
+  ASSERT_OK_AND_EQ(1, scanner->CountRows());
+}
+
+TEST_F(TestFilteredDataset, ReplaceSchema) {
+  SetSchema({field("i", int32())});
+  auto batch = RecordBatchFromJSON(schema_, R"([[1], [2]])");
+  auto child = std::make_shared<InMemoryDataset>(schema_, RecordBatchVector{batch});
+  ASSERT_OK_AND_ASSIGN(
+      auto filtered, FilteredDataset::Make(child, compute::equal(compute::field_ref("i"),
+                                                                 compute::literal(2))));
+
+  auto wider = schema({field("i", int32()), field("j", utf8())});
+  ASSERT_OK_AND_ASSIGN(auto replaced, filtered->ReplaceSchema(wider));
+  ASSERT_EQ("filtered", replaced->type_name());
+  ASSERT_OK_AND_ASSIGN(auto builder, replaced->NewScan());
+  ASSERT_OK_AND_ASSIGN(auto scanner, builder->Finish());
+  ASSERT_OK_AND_ASSIGN(auto table, scanner->ToTable());
+  AssertTablesEqual(*TableFromJSON(wider, {R"([[2, null]])"}), *table,
+                    /*same_chunk_layout=*/false);
+
+  // The filter must still bind against the new schema.
+  ASSERT_FALSE(filtered->ReplaceSchema(schema({field("j", utf8())})).ok());
+}
+
 TEST(TestProjector, CheckProjectable) {
   struct Assert {
     explicit Assert(FieldVector from) : from_(from) {}

@@ -19,6 +19,7 @@
 #include <utility>
 
 #include "arrow/acero/util.h"
+#include "arrow/compute/api_vector.h"
 #include "arrow/dataset/dataset.h"
 #include "arrow/dataset/dataset_internal.h"
 #include "arrow/dataset/projector.h"
@@ -319,6 +320,117 @@ Result<std::shared_ptr<Dataset>> UnionDataset::ReplaceSchema(
 
 Result<FragmentIterator> UnionDataset::GetFragmentsImpl(compute::Expression predicate) {
   return GetFragmentsFromDatasets(children_, predicate);
+}
+
+FilteredFragment::FilteredFragment(std::shared_ptr<Fragment> fragment,
+                                   compute::Expression filter)
+    : Fragment(fragment->partition_expression(), /*physical_schema=*/nullptr),
+      fragment_(std::move(fragment)),
+      filter_(std::move(filter)) {}
+
+Result<std::shared_ptr<Schema>> FilteredFragment::ReadPhysicalSchemaImpl() {
+  return fragment_->ReadPhysicalSchema();
+}
+
+Status FilteredFragment::ClearCachedMetadata() {
+  RETURN_NOT_OK(Fragment::ClearCachedMetadata());
+  return fragment_->ClearCachedMetadata();
+}
+
+std::string FilteredFragment::ToString() const {
+  return "filtered(" + fragment_->ToString() + ", " + filter_.ToString() + ")";
+}
+
+Result<RecordBatchGenerator> FilteredFragment::ScanBatchesAsync(
+    const std::shared_ptr<ScanOptions>& options) {
+  const auto& dataset_schema = options->dataset_schema;
+  ARROW_ASSIGN_OR_RAISE(auto filter, filter_.Bind(*dataset_schema));
+  ARROW_ASSIGN_OR_RAISE(filter,
+                        SimplifyWithGuarantee(std::move(filter), partition_expression_));
+  if (!filter.IsSatisfiable()) {
+    return MakeEmptyGenerator<std::shared_ptr<RecordBatch>>();
+  }
+
+  // Push our filter down to the wrapped fragment so it can skip data that cannot
+  // match, and so that the columns it references are materialized.
+  auto fragment_options = std::make_shared<ScanOptions>(*options);
+  ARROW_ASSIGN_OR_RAISE(fragment_options->filter,
+                        compute::and_(options->filter, filter).Bind(*dataset_schema));
+  ARROW_ASSIGN_OR_RAISE(auto batches, fragment_->ScanBatchesAsync(fragment_options));
+  if (filter == compute::literal(true)) {
+    return batches;
+  }
+
+  // Pushdown only prunes, so apply our filter exactly to each batch.
+  auto guarantee = partition_expression_;
+  auto pool = options->pool;
+  return MakeMappedGenerator(
+      std::move(batches),
+      [filter, dataset_schema, guarantee, pool](const std::shared_ptr<RecordBatch>& batch)
+          -> Result<std::shared_ptr<RecordBatch>> {
+        compute::ExecContext exec_context(pool);
+        ARROW_ASSIGN_OR_RAISE(auto exec_batch,
+                              compute::MakeExecBatch(*dataset_schema, batch, guarantee));
+        ARROW_ASSIGN_OR_RAISE(Datum mask, compute::ExecuteScalarExpression(
+                                              filter, exec_batch, &exec_context));
+        if (mask.is_scalar()) {
+          const auto& selected = mask.scalar_as<BooleanScalar>();
+          return selected.is_valid && selected.value ? batch : batch->Slice(0, 0);
+        }
+        ARROW_ASSIGN_OR_RAISE(
+            Datum filtered,
+            compute::Filter(batch, mask, compute::FilterOptions::Defaults(),
+                            &exec_context));
+        return filtered.record_batch();
+      });
+}
+
+Future<std::optional<int64_t>> FilteredFragment::CountRows(
+    compute::Expression predicate, const std::shared_ptr<ScanOptions>& options) {
+  // A metadata-only count of the rows matching both predicates is exact.
+  ARROW_ASSIGN_OR_RAISE(
+      auto combined,
+      compute::and_(std::move(predicate), filter_).Bind(*options->dataset_schema));
+  return fragment_->CountRows(std::move(combined), options);
+}
+
+FilteredDataset::FilteredDataset(std::shared_ptr<Dataset> child,
+                                 compute::Expression filter)
+    : Dataset(child->schema(), child->partition_expression()),
+      child_(std::move(child)),
+      filter_(std::move(filter)) {}
+
+Result<std::shared_ptr<FilteredDataset>> FilteredDataset::Make(
+    std::shared_ptr<Dataset> child, compute::Expression filter) {
+  // Keep the filter as given and bind it on use, so it stays valid if the schema is
+  // replaced (e.g. by the unified schema of a UnionDataset).
+  ARROW_ASSIGN_OR_RAISE(auto bound, filter.Bind(*child->schema()));
+  if (!bound.type()->Equals(*boolean())) {
+    return Status::TypeError("FilteredDataset filter must be boolean, got ",
+                             *bound.type());
+  }
+  return std::shared_ptr<FilteredDataset>(
+      new FilteredDataset(std::move(child), std::move(filter)));
+}
+
+Result<std::shared_ptr<Dataset>> FilteredDataset::ReplaceSchema(
+    std::shared_ptr<Schema> schema) const {
+  ARROW_ASSIGN_OR_RAISE(auto child, child_->ReplaceSchema(std::move(schema)));
+  ARROW_ASSIGN_OR_RAISE(auto filtered, Make(std::move(child), filter_));
+  return std::static_pointer_cast<Dataset>(std::move(filtered));
+}
+
+Result<FragmentIterator> FilteredDataset::GetFragmentsImpl(
+    compute::Expression predicate) {
+  ARROW_ASSIGN_OR_RAISE(auto combined,
+                        compute::and_(std::move(predicate), filter_).Bind(*schema_));
+  ARROW_ASSIGN_OR_RAISE(auto fragments, child_->GetFragments(std::move(combined)));
+  auto filter = filter_;
+  return MakeMapIterator(
+      [filter](std::shared_ptr<Fragment> fragment) -> std::shared_ptr<Fragment> {
+        return std::make_shared<FilteredFragment>(std::move(fragment), filter);
+      },
+      std::move(fragments));
 }
 
 namespace {
