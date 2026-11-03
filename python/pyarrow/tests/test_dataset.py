@@ -5644,6 +5644,7 @@ def test_union_dataset_filter(tempdir, dstype):
     })
 
 
+@pytest.mark.parquet
 def test_filtered_dataset(tempdir, pickle_module):
     table = pa.table({"part": [1, 1, 2, 2], "value": [1, 2, 3, 4]})
     ds.write_dataset(table, tempdir, format="parquet", partitioning=["part"])
@@ -5672,6 +5673,45 @@ def test_filtered_dataset(tempdir, pickle_module):
         ds.FilteredDataset(dataset, pc.field("missing") > 1)
     with pytest.raises(TypeError):
         ds.FilteredDataset(dataset, pc.field("value") + 1)
+
+
+@pytest.mark.parquet
+def test_union_of_filtered_datasets_pushes_down_outer_filter(tempdir):
+    # Two files partitioned by parity of "day", each sorted by "day" with 20 row
+    # groups spanning 50 days apiece.
+    day = pa.array(np.arange(100_000) // 100)
+    table = pa.table({"day": day, "v": pc.cast(pc.multiply(day, 2), "float64")})
+    for parity in (0, 1):
+        part_dir = tempdir / f"odd={parity}"
+        part_dir.mkdir()
+        pq.write_table(table.filter(pc.equal(pc.bit_wise_and(day, 1), parity)),
+                       part_dir / "part.parquet", row_group_size=2_500)
+    base = ds.dataset(tempdir, format="parquet", partitioning="hive")
+
+    low = base.filter(pc.field("day") < 300)
+    high = base.filter(pc.field("day") >= 700)
+    union = ds.dataset([low, high])
+    outer = (pc.field("day") >= 250) & (pc.field("day") < 750)
+
+    def row_groups_read(filter):
+        # Row groups are smaller than the batch size, so each one that is read
+        # yields exactly one batch, which is kept even when no rows match.
+        return [len(list(fragment.to_batches(schema=union.schema, filter=filter)))
+                for fragment in union.get_fragments(filter=filter)]
+
+    # Each child's own filter alone selects 6 row groups per file...
+    assert row_groups_read(None) == [6, 6, 6, 6]
+    # ...and combined with the outer filter, only the single row group per file
+    # covering days 250-299 or 700-749 is read.
+    assert row_groups_read(outer) == [1, 1, 1, 1]
+
+    # Fragments are pruned using the outer filter and the partition expressions.
+    assert len(list(union.get_fragments(filter=pc.field("odd") == 1))) == 2
+
+    expected = pa.concat_tables([low.to_table(), high.to_table()]).filter(outer)
+    result = union.filter(outer)
+    assert result.to_table().sort_by("day").equals(expected.sort_by("day"))
+    assert result.count_rows() == expected.num_rows == 10_000
 
 
 def test_parquet_dataset_filter(tempdir):
